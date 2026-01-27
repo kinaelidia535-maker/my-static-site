@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>{{TITLE}}</title>
+<meta content="Ningbo MOS Chemical Co., Ltd. - Professional manufacturer of surfactants and fine chemicals." name="description"/>
+<meta content="surfactants, fine chemicals, chemical manufacturer, Ningbo MOS Chemical" name="keywords"/>
+<link href="../imgs/logo/logo.webp" rel="icon" type="image/webp"/>
+<link href="../styles.css" rel="stylesheet"/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"/>
+</head>
+<body>
+<!-- Header Navigation -->
+<header class="header">
+<nav class="navbar">
+<div class="container">
+<div class="nav-brand">
+<img alt="CompanyLogo" class="logo" src="../imgs/logo/logo1.png"/>
+<span class="brand-text"></span>
+</div>
+<ul class="nav-menu">
+<li class="nav-item">
+<a class="nav-link" href="../index.html">Home</a>
+</li>
+<li class="nav-item dropdown">
+<a class="nav-link" href="../company.html">About</a>
+<ul class="dropdown-menu">
+<li><a href="../company.html">Company</a></li>
+<li><a href="../culture.html">Culture</a></li>
+<li><a href="../technology.html">Technology</a></li>
+</ul>
+</li>
+<li class="nav-item dropdown">
+<a class="nav-link" href="../products/all.html">Products</a>
+<ul class="dropdown-menu">
+<li><a href="../products/all.html">Summary of Surfactant Products</a></li>
+<li><a href="../products/textile.html">Surfactants Products for Textiles</a></li>
+<li><a href="../products/daily.html">Surfactants Products for Home Care</a></li>
+<li><a href="../products/leather.html">Surfactants Products for Leather</a></li>
+<li><a href="../products/metal.html">Surfactants Products for Metal Processing</a></li>
+<li><a href="../products/emulsion.html">Surfactants Products for Emulsions &amp; Coatings</a></li>
+<li><a href="../products/BASF.html">Surfactants Products by BASF</a></li>
+<li><a href="../products/BYK.html">Surfactants Products by BYK</a></li>
+<li><a href="../products/others.html">Other Surfactants</a></li>
+</ul>
+</li>
+<li class="nav-item dropdown">
+<a class="nav-link" href="../news.html">News</a>
+<ul class="dropdown-menu">
+<li><a href="../news.html">News</a></li>
+<li><a href="../dynamics.html">Dynamics</a></li>
+<li><a href="../knowledge.html">Knowledge</a></li>
+</ul>
+</li>
+<li class="nav-item">
+<a class="nav-link" href="../contact.html">Contact</a>
+</li>
+<li class="nav-item language-switch">
+<a class="nav-link lang-link" href="../zh/dynamics/410.html"><img alt="ZH" class="flag-icon" loading="lazy" src="../flags/china-flag.svg"/><span class="flag-label">Chinese</span></a>
+<a class="nav-link lang-link" href="../ru/dynamics/410.html"><img alt="RU" class="flag-icon" loading="lazy" src="../flags/russia-flag.svg"/><span class="flag-label">Pусский</span></a>
+</li>
+</ul>
+<div class="mobile-menu-toggle">
+<i class="fas fa-bars"></i>
+</div>
+</div>
+</nav>
+</header>
+<!-- Main content area -->
+<main>
+<!-- Page Title -->
+<section class="page-header">
+<div class="container">
+<div class="breadcrumb">
+<a href="../index.html">Home</a>
+<span>/</span>
+<a href="../dynamics.html">Dynamics</a>
+<span>/</span>
+<span>{{TITLE}}</span>
+</div>
+<h1>Dynamics</h1>
+<p>INDUSTRY DYNAMICS</p>
+</div>
+</section>
+<!-- Article Details Content -->
+<section class="content-section">
+<div class="container">
+<div class="article-detail-ref">
+<!-- Article Title -->
+<h1 class="article-title-ref">{{TITLE}}</h1>
+<!-- Article Metadata -->
+<div class="article-meta-ref">
+<span class="meta-item-ref">
+<span class="meta-label-ref">Posted on:</span>
+<span class="meta-value-ref">{{DATE}}</span>
+</span>
+<span class="meta-item-ref">
+<span class="meta-label-ref">Section:</span>
+<span class="meta-value-ref">Dynamics</span>
+</span>
+</div>
+<!-- Article body content -->
+<div class="article-content-ref">
+<p>{{CONTENT}}</p>
+</div>
+<!-- Article Navigation -->
+<!-- Article Navigation -->
+<div class="article-nav-ref">
+    <div class="nav-prev-ref">
+    <span class="nav-label-ref">Previous article:</span>
+    <a class="nav-link-ref" href="{{PREV_LINK}}">{{PREV_TITLE}}</a>
+    </div>
+    <div class="nav-next-ref">
+    <span class="nav-label-ref">Next:</span>
+    <a class="nav-link-ref" href="{{NEXT_LINK}}">{{NEXT_TITLE}}</a>
+    </div>
+    </div>
+<!-- Hashtag -->
+<div class="article-tags-ref">
+<span class="tags-label-ref">Hashtag:</span>
+<div class="tags-list-ref">
+<span class="tag-item-ref">#Zhongchu Xin New Materials</span>
+<span class="tag-item-ref">#Jingzhou Chemical Project</span>
+<span class="tag-item-ref">#Surfactant production capacity</span>
+<span class="tag-item-ref">#Huazhong Fine Chemicals</span>
+</div>
+</div>
+<!-- Share button -->
+<div class="share-buttons-ref">
+<span class="share-label-ref">Share</span>
+<div class="share-icons-ref">
+<a class="share-icon-ref" href="#" onclick="shareToInstagram(); return false;" title="Instagram">
+<i class="fab fa-instagram"></i>
+</a>
+<a class="share-icon-ref" href="#" onclick="shareToFacebook(); return false;" title="Facebook">
+<i class="fab fa-facebook"></i>
+</a>
+<a class="share-icon-ref" href="#" onclick="shareToLinkedIn(); return false;" title="LinkedIn">
+<i class="fab fa-linkedin"></i>
+</a>
+<a class="share-icon-ref" href="#" onclick="shareToWhatsApp(); return false;" title="WhatsApp">
+<i class="fab fa-whatsapp"></i>
+</a>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="footer">
+<div class="container">
+<div class="footer-content">
+<!-- Quick Links -->
+<div class="footer-section footer-links-section">
+<h3>Quick Links</h3>
+<ul class="footer-links">
+<li><a href="../index.html">Home</a></li>
+<li><a href="../company.html">About Us</a></li>
+<li><a href="../products/all.html">Products</a></li>
+<li><a href="../news.html">News</a></li>
+<li><a href="../contact.html">Contact</a></li>
+</ul>
+</div>
+<!-- Product Categories -->
+<div class="footer-section footer-products">
+<h3>Products</h3>
+<ul class="footer-links">
+<li><a href="../products/all.html">Summary of Surfactant Products</a></li>
+<li><a href="../products/textile.html">Surfactants Products for Textiles</a></li>
+<li><a href="../products/daily.html">Surfactants Products for Home Care</a></li>
+<li><a href="../products/leather.html">Surfactants Products for Leather</a></li>
+<li><a href="../products/metal.html">Surfactants Products for Metal Processing</a></li>
+<li><a href="../products/emulsion.html">Surfactants Products for Emulsions &amp; Coatings</a></li>
+<li><a href="../products/BASF.html">Surfactants Products by BASF</a></li>
+<li><a href="../products/BYK.html">Surfactants Products by BYK</a></li>
+<li><a href="../products/others.html">Other Surfactants</a></li>
+</ul>
+</div>
+<!-- Contact Information -->
+<div class="footer-section footer-contact">
+<h3>Contact Us</h3>
+<div class="contact-info">
+<p><strong>Phone:</strong> <a href="tel:+8618989305995">+86-189-8930-5995</a></p>
+<p><strong>Landline:</strong> <a href="tel:+8657489212210">+86-574-89212210</a></p>
+<p><strong>WhatsApp:</strong> <a href="https://wa.me/8618989305995" target="_blank">+86-189-8930-5995</a></p>
+<p><strong>Telegram:</strong> <a href="https://t.me/+8618989305995" target="_blank">+86-189-8930-5995</a></p>
+<p><strong>Email:</strong> <a href="mailto:info@mos-surfactant.com">info@mos-surfactant.com</a></p>
+<p><strong>Address:</strong> YINXIANDADAO 1357, GUANGBO CENTER OFFICE 2003, NINGBO, ZHEJIANG, CHINA, 315100</p>
+</div>
+</div>
+</div>
+<!-- Footer Bottom -->
+<div class="footer-bottom">
+<p>Copyright © Ningbo MOS Chemical Co., Ltd. All rights reserved | <a href="https://beian.miit.gov.cn/" rel="noopener noreferrer" target="_blank">Zhejiang ICP License No. 2025195168-2</a></p>
+</div>
+</div>
+</footer>
+<script src="../script.js"></script>
+<div class="floating-chat" id="ht-ctc-chat">
+<div class="floating-chat__bubble floating-chat__bubble--whatsapp">
+<a aria-label="Chat with us on WhatsApp" href="https://wa.me/8618989305995" rel="noopener noreferrer" target="_blank">
+<i class="fab fa-whatsapp"></i>
+<span>WhatsApp us</span>
+</a>
+</div>
+<div class="floating-chat__bubble floating-chat__bubble--telegram">
+<a aria-label="Message us on Telegram" href="https://t.me/+8618989305995" rel="noopener noreferrer" target="_blank">
+<i class="fab fa-telegram-plane"></i>
+<span>Telegram us</span>
+</a>
+</div>
+<div class="floating-chat__bubble floating-chat__bubble--email">
+<a aria-label="Email us" href="mailto:info@mos-surfactant.com">
+<i class="fas fa-envelope"></i>
+<span>Email us</span>
+</a>
+</div>
+</div>
+</body>
+</html>
