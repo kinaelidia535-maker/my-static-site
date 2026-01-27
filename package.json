@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "contentful": "^10.0.0",
+    "@contentful/rich-text-html-renderer": "^15.12.0"
+  }
+}
