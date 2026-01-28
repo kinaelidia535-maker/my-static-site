@@ -16,7 +16,7 @@ async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
 
   items.forEach((item, i) => {
-    const { title, body, slug } = item.fields;
+    const { title, body, slug, datedTime} = item.fields;
     const date = new Date(item.sys.createdAt).toLocaleDateString();
     
     // 转换富文本正文
@@ -29,13 +29,14 @@ async function run() {
     let html = template
       .replace(/{{TITLE}}/g, title)
       .replace(/{{CONTENT}}/g, contentHtml)
-      .replace(/{{DATE}}/g, date);
+      .replace(/{{DATE}}/g, datedTime);
+
 
     // 填充上下页链接占位符
     html = html.replace('{{PREV_LINK}}', prevPost ? `${prevPost.fields.slug}.html` : '#');
-    html = html.replace('{{PREV_TITLE}}', prevPost ? prevPost.fields.title : '没有了');
+    html = html.replace('{{PREV_TITLE}}', prevPost ? prevPost.fields.title : 'None');
     html = html.replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#');
-    html = html.replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : '已经是最新');
+    html = html.replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
 
     fs.writeFileSync(`./dist/${slug}.html`, html);
     console.log(`已生成: ${slug}.html`);
