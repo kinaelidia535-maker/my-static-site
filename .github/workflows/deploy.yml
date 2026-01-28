@@ -2,9 +2,9 @@ name: Auto Deploy to Aliyun OSS
 
 on:
   push:
-    branches: [ main ] # 当你修改代码上传时触发
+    branches: [ main ]
   repository_dispatch:
-    types: [contentful_update] # 当 Contentful 发布新文章时触发
+    types: [contentful_update]
 
 jobs:
   build-and-deploy:
@@ -21,18 +21,20 @@ jobs:
       - name: Install & Build
         run: |
           npm install
-          node build.js # 执行你写的抓取 Contentful 并填入 template.html 的脚本
+          node build.js 
         env:
           CONTENTFUL_SPACE_ID: ${{ secrets.CONTENTFUL_SPACE_ID }}
           CONTENTFUL_ACCESS_TOKEN: ${{ secrets.CONTENTFUL_ACCESS_TOKEN }}
 
-      - name: Upload to OSS
+      - name: Setup ossutil
         uses: manyuanrong/setup-ossutil@v2.0
         with:
-          # 示例：oss-cn-hangzhou.aliyuncs.com（根据你的 OSS 实际区域修改）
-          endpoint: "你的OSS区域Endpoint" 
+          endpoint: "oss-eu-central-1.aliyuncs.com" 
           access-key-id: ${{ secrets.OSS_ID }}
           access-key-secret: ${{ secrets.OSS_SECRET }}
-      
-      # 将 build.js 生成的 dist 文件夹内容拷贝到 OSS 根目录
-      - run: ossutil cp -r ./dist/ oss://你的Bucket名字/ -f
+
+      - name: Deploy to Aliyun OSS
+        run: |
+          # 将 dist 文件夹内的 HTML 上传到 OSS 的 dynamics 文件夹下
+          # 如果你想直接传到根目录，就去掉路径末尾的 dynamics/
+          ossutil cp -r ./dist/ oss://mos-surfactant/dynamics/ -f
