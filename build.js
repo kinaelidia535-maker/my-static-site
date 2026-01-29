@@ -7,15 +7,18 @@ const client = contentful.createClient({
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
 });
 
+// 设置语言
 const locales = ['en-US', 'ru'];
 
 async function run() {
-  // 确保 dist 根目录存在，防止后续上传 OSS 找不到文件夹
+  // 确保 dist 目录存在
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
 
   for (const locale of locales) {
-    const lang = locale.split('-')[0]; 
-    console.log(`正在处理语言 [${lang}]...`);
+    const isEn = locale === 'en-US';
+    const langPrefix = isEn ? '' : 'ru'; // 英文为空，俄文为 ru
+    
+    console.log(`正在处理语言 [${locale}]，目标目录：${isEn ? '根目录' : '/ru/'}`);
 
     const response = await client.getEntries({ 
       content_type: 'master', 
@@ -24,35 +27,43 @@ async function run() {
     });
     
     const allEntries = response.items;
-    if (allEntries.length === 0) {
-        console.log(`语言 [${lang}] 没有找到文章，跳过。`);
-        continue;
-    }
+    if (allEntries.length === 0) continue;
 
-    const langDir = `./dist/${lang}`;
-    if (!fs.existsSync(langDir)) fs.mkdirSync(langDir, { recursive: true });
+    // 确定当前语言的基础写入路径
+    // 英文 -> ./dist
+    // 俄文 -> ./dist/ru
+    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
+    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 生成列表页使用的 data.json
+    // 1. 生成 data.json (供当前目录下 dynamics.html 等页面读取)
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
       if (!thumbUrl) {
         const randomNum = String(Math.floor(Math.random() * 43) + 1).padStart(2, '0');
         thumbUrl = `/imgs/article_imgs/${randomNum}.png`;
       }
+      
+      // 生成文章详情页的 URL 路径
+      // 英文例: /dynamics/slug.html
+      // 俄文例: /ru/dynamics/slug.html
+      const cat = (item.fields.category || 'dynamics').toLowerCase();
+      const articleUrl = isEn ? `/${cat}/${item.fields.slug}.html` : `/ru/${cat}/${item.fields.slug}.html`;
+
       return {
         title: item.fields.title,
         summary: item.fields.summary || '', 
         date: item.fields.datedTime,
-        url: `/${lang}/${(item.fields.category || 'dynamics').toLowerCase()}/${item.fields.slug}.html`,
+        url: articleUrl,
         img: thumbUrl
       };
     });
-    fs.writeFileSync(`${langDir}/data.json`, JSON.stringify(indexData));
+    fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
 
-    // 处理详情页模板
-    const templatePath = `./template_${lang}.html`;
+    // 2. 加载模板
+    const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
+    // 3. 按分类分组处理详情页
     const groups = { dynamics: [], news: [], knowledge: [] };
     allEntries.forEach(item => {
       const cat = (item.fields.category || 'dynamics').toLowerCase();
@@ -68,15 +79,16 @@ async function run() {
         const prevPost = items[i + 1];
 
         const domain = "https://www.mos-surfactant.com";
-        const pageUrl = encodeURIComponent(`${domain}/${lang}/${catName}/${slug}.html`);
+        // 社交分享链接
+        const sharePath = isEn ? `/${catName}/${slug}.html` : `/ru/${catName}/${slug}.html`;
+        const pageUrl = encodeURIComponent(`${domain}${sharePath}`);
 
-        // --- 修复点：将原来的 category 改为 catName ---
         let html = template
           .replace(/{{TITLE}}/g, title)
           .replace(/{{CONTENT}}/g, contentHtml)
           .replace(/{{DATE}}/g, datedTime)
           .replace(/{{SLUG}}/g, slug)
-          .replace(/{{CATEGORY}}/g, catName) // 这里之前写错了
+          .replace(/{{CATEGORY}}/g, catName)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
           .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodeURIComponent(title)}%20${pageUrl}`)
@@ -87,7 +99,10 @@ async function run() {
                    .replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#')
                    .replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
 
-        const outDir = `${langDir}/${catName}`;
+        // 写入分目录
+        // 英文 -> ./dist/dynamics/
+        // 俄文 -> ./dist/ru/dynamics/
+        const outDir = `${langBaseDir}/${catName}`;
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(`${outDir}/${slug}.html`, html);
       });
@@ -98,5 +113,5 @@ async function run() {
 
 run().catch(error => {
     console.error("构建失败:", error);
-    process.exit(1); // 确保 GitHub Actions 接收到错误信号
+    process.exit(1);
 });
