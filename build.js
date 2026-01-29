@@ -7,87 +7,92 @@ const client = contentful.createClient({
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
 });
 
+// 设置语言：移除中文，仅保留英文和俄文
+const locales = ['en-US', 'ru'];
+
 async function run() {
-  // 1. 获取全量数据（按时间倒序）
-  const response = await client.getEntries({ content_type: 'master', order: '-sys.createdAt' });
-  const allEntries = response.items;
-  const template = fs.readFileSync('./template.html', 'utf8');
+  for (const locale of locales) {
+    const lang = locale.split('-')[0]; // 'en' 或 'ru'
+    console.log(`正在处理语言 [${lang}]...`);
 
-  if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
-
-  // 2. 将文章按 category 分组
-  const groups = {
-    dynamics: [],
-    news: [],
-    knowledge: []
-  };
-
-  allEntries.forEach(item => {
-    // 确保 category 存在并转为小写，否则归入 dynamics
-    const cat = (item.fields.category || 'dynamics').toLowerCase();
-    if (groups[cat]) {
-      groups[cat].push(item);
-    } else {
-      // 预防万一有拼写错误或新分类，动态创建分组
-      groups[cat] = [item];
-    }
-  });
-
-  // 3. 遍历每个分类组独立生成页面
-  for (const [catName, items] of Object.entries(groups)) {
-    console.log(`正在生成 ${catName} 分类，共 ${items.length} 篇文章...`);
-
-    items.forEach((item, i) => {
-      const { title, body, slug, datedTime } = item.fields;
-      
-      // 4. 在当前分类数组（items）内找上下页，彻底解决跳频道问题
-      const nextPost = items[i - 1]; // 索引小的是更新的
-      const prevPost = items[i + 1]; // 索引大的是更旧的
-
-      // 5. 转换正文
-      const contentHtml = documentToHtmlString(body);
-
-      // 6. 生成社媒分享链接（路径包含当前分类）
-      const domain = "https://www.mos-surfactant.com";
-      const pageUrl = encodeURIComponent(`${domain}/${catName}/${slug}.html`);
-      const pageTitle = encodeURIComponent(title);
-
-      const linkedinShare = `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`;
-      const facebookShare = `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`;
-      const whatsappShare = `https://api.whatsapp.com/send?text=${pageTitle}%20${pageUrl}`;
-      const twitterShare = `https://twitter.com/intent/tweet?text=${pageTitle}&url=${pageUrl}`;
-
-      // 7. 执行 HTML 替换
-      let html = template
-        .replace(/{{TITLE}}/g, title)
-        .replace(/{{CONTENT}}/g, contentHtml)
-        .replace(/{{DATE}}/g, datedTime)
-        .replace(/{{SLUG}}/g, slug)
-        .replace(/{{CATEGORY}}/g, catName);
-
-      // 8. 填充分享占位符
-      html = html
-        .replace(/{{LINKEDIN_SHARE}}/g, linkedinShare)
-        .replace(/{{FACEBOOK_SHARE}}/g, facebookShare)
-        .replace(/{{WHATSAPP_SHARE}}/g, whatsappShare)
-        .replace(/{{TWITTER_SHARE}}/g, twitterShare);
-
-      // 9. 填充上下页逻辑
-      // 既然在同一个文件夹内，直接用 slug.html，不再需要 ../
-      html = html.replace('{{PREV_LINK}}', prevPost ? `${prevPost.fields.slug}.html` : '#');
-      html = html.replace('{{PREV_TITLE}}', prevPost ? prevPost.fields.title : 'None');
-      
-      html = html.replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#');
-      html = html.replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
-
-      // 10. 写入分目录
-      const outDir = `./dist/${catName}`;
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-
-      fs.writeFileSync(`${outDir}/${slug}.html`, html);
+    // 1. 获取该语言全量数据
+    const response = await client.getEntries({ 
+      content_type: 'master', 
+      locale: locale, 
+      order: '-sys.createdAt' 
     });
+    
+    const allEntries = response.items;
+    if (allEntries.length === 0) continue;
+
+    // 创建语言根目录
+    const langDir = `./dist/${lang}`;
+    if (!fs.existsSync(langDir)) fs.mkdirSync(langDir, { recursive: true });
+
+    // 2. 生成列表页使用的 data.json [核心改动]
+    const indexData = allEntries.map(item => {
+      // 封面图逻辑：优先用 Contentful 里的 featuredImage，没有则随机分配 /imgs/article_imgs/01-43.png
+      let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
+      if (!thumbUrl) {
+        const randomNum = String(Math.floor(Math.random() * 43) + 1).padStart(2, '0');
+        thumbUrl = `/imgs/article_imgs/${randomNum}.png`;
+      }
+      return {
+        title: item.fields.title,
+        summary: item.fields.summary || '', // 记得在 Contentful 增加该字段
+        date: item.fields.datedTime,
+        url: `/${lang}/${(item.fields.category || 'dynamics').toLowerCase()}/${item.fields.slug}.html`,
+        img: thumbUrl
+      };
+    });
+    fs.writeFileSync(`${langDir}/data.json`, JSON.stringify(indexData));
+
+    // 3. 处理详情页
+    const templatePath = `./template_${lang}.html`;
+    const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
+
+    // 按 category 分组以计算同分类内的“上下篇”
+    const groups = { dynamics: [], news: [], knowledge: [] };
+    allEntries.forEach(item => {
+      const cat = (item.fields.category || 'dynamics').toLowerCase();
+      if (groups[cat]) groups[cat].push(item);
+      else groups[cat] = [item];
+    });
+
+    for (const [catName, items] of Object.entries(groups)) {
+      items.forEach((item, i) => {
+        const { title, body, slug, datedTime } = item.fields;
+        const contentHtml = documentToHtmlString(body);
+        const nextPost = items[i - 1]; 
+        const prevPost = items[i + 1];
+
+        const domain = "https://www.mos-surfactant.com";
+        const pageUrl = encodeURIComponent(`${domain}/${lang}/${catName}/${slug}.html`);
+
+        let html = template
+          .replace(/{{TITLE}}/g, title)
+          .replace(/{{CONTENT}}/g, contentHtml)
+          .replace(/{{DATE}}/g, datedTime)
+          .replace(/{{SLUG}}/g, slug)
+          .replace(/{{CATEGORY}}/g, category)
+          .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
+          .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
+          .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodeURIComponent(title)}%20${pageUrl}`)
+          .replace(/{{TWITTER_SHARE}}/g, `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${pageUrl}`);
+
+        // 上下篇链接
+        html = html.replace('{{PREV_LINK}}', prevPost ? `${prevPost.fields.slug}.html` : '#')
+                   .replace('{{PREV_TITLE}}', prevPost ? prevPost.fields.title : 'None')
+                   .replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#')
+                   .replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
+
+        const outDir = `${langDir}/${catName}`;
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(`${outDir}/${slug}.html`, html);
+      });
+    }
   }
-  console.log('所有页面生成完成！');
+  console.log('所有语种及页面生成完成！');
 }
 
 run().catch(console.error);
