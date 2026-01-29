@@ -7,18 +7,55 @@ const client = contentful.createClient({
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
 });
 
-// 设置语言
 const locales = ['en-US', 'ru'];
 
+// 静态页面配置（用于生成 Sitemap）
+const staticPages = [
+  'index.html', 'company.html', 'contact.html', 'culture.html', 
+  'dynamics.html', 'news.html', 'knowledge.html', 'products.html'
+];
+
+// Sitemap 生成函数
+function generateSitemap(allEnArticles, allRuArticles) {
+  const domain = 'https://www.mos-surfactant.com';
+  const lastMod = new Date().toISOString().split('T')[0];
+
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
+
+  // 1. 添加静态页面（双语）
+  staticPages.forEach(page => {
+    // 英文根目录
+    xml += `\n  <url><loc>${domain}/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.8</priority></url>`;
+    // 俄文目录
+    xml += `\n  <url><loc>${domain}/ru/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.7</priority></url>`;
+  });
+
+  // 2. 添加动态文章（英文）
+  allEnArticles.forEach(item => {
+    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
+  });
+
+  // 3. 添加动态文章（俄文）
+  allRuArticles.forEach(item => {
+    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
+  });
+
+  xml += `\n</urlset>`;
+  fs.writeFileSync('./dist/sitemap.xml', xml);
+  console.log('🚀 Sitemap.xml 已成功生成至 dist 根目录');
+}
+
 async function run() {
-  // 确保 dist 目录存在
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
+
+  // 用于收集所有文章数据以生成 Sitemap
+  let allEnForSitemap = [];
+  let allRuForSitemap = [];
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
-    const langPrefix = isEn ? '' : 'ru'; // 英文为空，俄文为 ru
-    
-    console.log(`正在处理语言 [${locale}]，目标目录：${isEn ? '根目录' : '/ru/'}`);
+    console.log(`正在处理语言 [${locale}]...`);
 
     const response = await client.getEntries({ 
       content_type: 'master', 
@@ -29,23 +66,16 @@ async function run() {
     const allEntries = response.items;
     if (allEntries.length === 0) continue;
 
-    // 确定当前语言的基础写入路径
-    // 英文 -> ./dist
-    // 俄文 -> ./dist/ru
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 1. 生成 data.json (供当前目录下 dynamics.html 等页面读取)
+    // 1. 生成 data.json
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
       if (!thumbUrl) {
         const randomNum = String(Math.floor(Math.random() * 43) + 1).padStart(2, '0');
         thumbUrl = `/imgs/article_imgs/${randomNum}.png`;
       }
-      
-      // 生成文章详情页的 URL 路径
-      // 英文例: /dynamics/slug.html
-      // 俄文例: /ru/dynamics/slug.html
       const cat = (item.fields.category || 'dynamics').toLowerCase();
       const articleUrl = isEn ? `/${cat}/${item.fields.slug}.html` : `/ru/${cat}/${item.fields.slug}.html`;
 
@@ -59,11 +89,14 @@ async function run() {
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
 
-    // 2. 加载模板
+    // 收集给 Sitemap 使用
+    if (isEn) allEnForSitemap = indexData;
+    else allRuForSitemap = indexData;
+
+    // 2. 生成详情页
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
-    // 3. 按分类分组处理详情页
     const groups = { dynamics: [], news: [], knowledge: [] };
     allEntries.forEach(item => {
       const cat = (item.fields.category || 'dynamics').toLowerCase();
@@ -77,9 +110,7 @@ async function run() {
         const contentHtml = documentToHtmlString(body);
         const nextPost = items[i - 1]; 
         const prevPost = items[i + 1];
-
         const domain = "https://www.mos-surfactant.com";
-        // 社交分享链接
         const sharePath = isEn ? `/${catName}/${slug}.html` : `/ru/${catName}/${slug}.html`;
         const pageUrl = encodeURIComponent(`${domain}${sharePath}`);
 
@@ -99,16 +130,16 @@ async function run() {
                    .replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#')
                    .replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
 
-        // 写入分目录
-        // 英文 -> ./dist/dynamics/
-        // 俄文 -> ./dist/ru/dynamics/
         const outDir = `${langBaseDir}/${catName}`;
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(`${outDir}/${slug}.html`, html);
       });
     }
   }
-  console.log('所有语种及页面生成完成！');
+
+  // 最后一步：生成 Sitemap
+  generateSitemap(allEnForSitemap, allRuForSitemap);
+  console.log('所有语种及 Sitemap 生成完成！');
 }
 
 run().catch(error => {
