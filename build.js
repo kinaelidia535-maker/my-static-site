@@ -11,8 +11,7 @@ const client = contentful.createClient({
 const locales = ['en-US', 'ru'];
 
 /**
- * 核心功能：递归扫描文件夹下的所有 HTML 文件
- * 确保 /zh/ 和 /ru/ 文件夹里的静态页面都能进入 Sitemap
+ * 递归扫描文件夹下的所有 HTML 文件，确保静态页面进入 Sitemap
  */
 function getAllHtmlFiles(dirPath, arrayOfFiles) {
   const files = fs.readdirSync(dirPath);
@@ -21,13 +20,11 @@ function getAllHtmlFiles(dirPath, arrayOfFiles) {
   files.forEach(function(file) {
     const fullPath = path.join(dirPath, file);
     if (fs.statSync(fullPath).isDirectory()) {
-      // 扫描包含页面内容的特定目录
       const includeDirs = ['ru', 'zh', 'news', 'dynamics', 'knowledge', 'products'];
       if (includeDirs.includes(file)) {
         arrayOfFiles = getAllHtmlFiles(fullPath, arrayOfFiles);
       }
     } else {
-      // 匹配 .html 文件并排除模板
       if (file.endsWith(".html") && !file.startsWith('template')) {
         const urlPath = fullPath.replace(/\\/g, '/').replace(/^\./, '');
         arrayOfFiles.push(urlPath);
@@ -39,24 +36,21 @@ function getAllHtmlFiles(dirPath, arrayOfFiles) {
 }
 
 /**
- * Sitemap 生成：包含全量静态扫描结果 + Contentful 动态文章
+ * Sitemap 生成
  */
 function generateSitemap(allEnArticles, allRuArticles) {
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
-  
   const staticUrls = getAllHtmlFiles('./');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
 
-  // 1. 写入扫描到的所有静态页面（含 ZH/RU 目录下的存量页面）
   staticUrls.forEach(url => {
     const priority = url.endsWith('index.html') ? '1.0' : '0.8';
     xml += `\n  <url><loc>${domain}${url}</loc><lastmod>${lastMod}</lastmod><priority>${priority}</priority></url>`;
   });
 
-  // 2. 写入 Contentful 动态生成的详情页
   [...allEnArticles, ...allRuArticles].forEach(item => {
     xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
   });
@@ -65,7 +59,7 @@ function generateSitemap(allEnArticles, allRuArticles) {
   
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
   fs.writeFileSync('./dist/sitemap.xml', xml);
-  console.log(`🚀 Sitemap.xml 生成成功，包含 ${staticUrls.length + allEnArticles.length + allRuArticles.length} 个链接。`);
+  console.log(`🚀 Sitemap.xml 生成成功！`);
 }
 
 async function run() {
@@ -90,10 +84,10 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 处理列表数据并提取 imgAlt
+    // 处理列表数据（data.json 将被 index.html 和 news.html 共同使用）
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
-      const altText = item.fields.imgAlt || item.fields.title; // 提取 imgAlt 字段
+      const altText = item.fields.imgAlt || item.fields.title; 
 
       if (!thumbUrl) {
         const randomNum = String(Math.floor(Math.random() * 43) + 1).padStart(2, '0');
@@ -110,24 +104,27 @@ async function run() {
         summary: item.fields.summary || '', 
         date: item.fields.datedTime,
         url: articleUrl,
-        img: thumbUrl,
-        alt: altText // 存入 JSON 供 index/dynamics 等页面渲染
+        img: thumbUrl, // 虽然 index 不显示，但 news.html 列表可能需要
+        alt: altText,
+        category: cat // 显式添加分类，方便前端过滤
       };
     });
 
+    // 核心修复：将全量数据写入 data.json，这样 news.html 才能获取到最新文章
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
 
     if (isEn) allEnForSitemap = indexData;
     else allRuForSitemap = indexData;
 
-    // 渲染文章详情页
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
-    const groups = { dynamics: [], news: [], knowledge: [] };
+    // 核心修复：动态分类组，确保所有分类都被扫到
+    const groups = {};
     allEntries.forEach(item => {
       const cat = (item.fields.category || 'dynamics').toLowerCase();
-      if (groups[cat]) groups[cat].push(item);
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
     });
 
     for (const [catName, items] of Object.entries(groups)) {
@@ -147,7 +144,7 @@ async function run() {
           .replace(/{{CONTENT}}/g, contentHtml)
           .replace(/{{DATE}}/g, datedTime)
           .replace(/{{SLUG}}/g, slug)
-          .replace(/{{IMG_ALT}}/g, currentAlt) // 详情页模板替换
+          .replace(/{{IMG_ALT}}/g, currentAlt)
           .replace(/{{CATEGORY}}/g, catName)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
@@ -167,7 +164,7 @@ async function run() {
   }
 
   generateSitemap(allEnForSitemap, allRuForSitemap);
-  console.log('✅ 构建任务全部完成！');
+  console.log('✅ 构建完成，新闻已同步至列表数据。');
 }
 
 run().catch(error => {
