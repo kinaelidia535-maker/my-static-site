@@ -1,5 +1,6 @@
 const contentful = require('contentful');
 const fs = require('fs');
+const path = require('path');
 const { documentToHtmlString } = require('@contentful/rich-text-html-renderer');
 
 const client = contentful.createClient({
@@ -9,49 +10,68 @@ const client = contentful.createClient({
 
 const locales = ['en-US', 'ru'];
 
-// --- 修改点：不再写死页面列表，改为自动扫描函数 ---
-function getStaticPages() {
-    // 扫描当前根目录下所有的 .html 文件，排除掉模板文件
-    return fs.readdirSync('./').filter(file => 
-        file.endsWith('.html') && 
-        !file.startsWith('template')
-    );
+/**
+ * 核心新增：递归扫描文件夹下的所有 HTML 文件
+ * 这样可以自动把 /zh/ 和 /ru/ 文件夹里的旧页面也加进 Sitemap
+ */
+function getAllHtmlFiles(dirPath, arrayOfFiles) {
+  const files = fs.readdirSync(dirPath);
+  arrayOfFiles = arrayOfFiles || [];
+
+  files.forEach(function(file) {
+    const fullPath = path.join(dirPath, file);
+    if (fs.statSync(fullPath).isDirectory()) {
+      // 只扫描特定的语种和内容文件夹，排除 dist, imgs, node_modules 等
+      const includeDirs = ['ru', 'zh', 'news', 'dynamics', 'knowledge', 'products'];
+      if (includeDirs.includes(file)) {
+        arrayOfFiles = getAllHtmlFiles(fullPath, arrayOfFiles);
+      }
+    } else {
+      // 匹配所有 .html 文件，但排除模板文件
+      if (file.endsWith(".html") && !file.startsWith('template')) {
+        // 格式化为 URL 路径，例如: /zh/index.html
+        const urlPath = fullPath.replace(/\\/g, '/').replace(/^\./, '');
+        arrayOfFiles.push(urlPath);
+      }
+    }
+  });
+
+  return arrayOfFiles;
 }
 
-// --- 修改后的 Sitemap 生成函数：全量覆盖扫描 ---
+// Sitemap 生成函数
 function generateSitemap(allEnArticles, allRuArticles) {
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
   
-  // 自动获取根目录所有的静态 HTML (包含 index, news, 甚至你之前的 zh 页面等)
-  const staticFiles = getStaticPages();
+  // 1. 深度扫描本地所有 HTML 文件（含 zh, ru 目录）
+  const staticUrls = getAllHtmlFiles('./');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
 
-  // 1. 添加所有根目录下的静态页面链接
-  staticFiles.forEach(page => {
-    // 英文版
-    xml += `\n  <url><loc>${domain}/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.8</priority></url>`;
-    // 尝试添加俄文版对应链接 (假设结构对称)
-    xml += `\n  <url><loc>${domain}/ru/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.7</priority></url>`;
+  // 2. 写入扫描到的所有静态页面
+  staticUrls.forEach(url => {
+    // 首页设置最高权重
+    const priority = url.endsWith('index.html') ? '1.0' : '0.8';
+    xml += `\n  <url><loc>${domain}${url}</loc><lastmod>${lastMod}</lastmod><priority>${priority}</priority></url>`;
   });
 
-  // 2. 添加 Contentful 动态文章（英文）
+  // 3. 写入从 Contentful 抓取的动态文章 (EN)
   allEnArticles.forEach(item => {
     xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
   });
 
-  // 3. 添加 Contentful 动态文章（俄文）
+  // 4. 写入从 Contentful 抓取的动态文章 (RU)
   allRuArticles.forEach(item => {
-    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${lastMod}</lastmod><priority>0.6</priority></url>`;
+    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
   });
 
   xml += `\n</urlset>`;
   
-  // 最终写入 dist 根目录
+  // 确保写入 dist 根目录
   fs.writeFileSync('./dist/sitemap.xml', xml);
-  console.log(`🚀 Sitemap.xml 已重新生成。共包含 ${staticFiles.length * 2 + allEnArticles.length + allRuArticles.length} 个链接。`);
+  console.log(`🚀 Sitemap.xml 已补全生成！共包含 ${staticUrls.length + allEnArticles.length + allRuArticles.length} 个链接。`);
 }
 
 async function run() {
@@ -76,6 +96,7 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
+    // 1. 生成 data.json
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
       if (!thumbUrl) {
@@ -98,6 +119,7 @@ async function run() {
     if (isEn) allEnForSitemap = indexData;
     else allRuForSitemap = indexData;
 
+    // 2. 生成详情页
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
@@ -141,8 +163,9 @@ async function run() {
     }
   }
 
+  // 最终生成 Sitemap
   generateSitemap(allEnForSitemap, allRuForSitemap);
-  console.log('所有语种及 Sitemap 生成完成！');
+  console.log('所有语种及全量 Sitemap 生成完成！');
 }
 
 run().catch(error => {
