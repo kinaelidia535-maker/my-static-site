@@ -10,73 +10,48 @@ const client = contentful.createClient({
 
 const locales = ['en-US', 'ru'];
 
-/**
- * 核心新增：递归扫描文件夹下的所有 HTML 文件
- * 这样可以自动把 /zh/ 和 /ru/ 文件夹里的旧页面也加进 Sitemap
- */
+// 递归扫描 HTML 文件 (保持不变)
 function getAllHtmlFiles(dirPath, arrayOfFiles) {
   const files = fs.readdirSync(dirPath);
   arrayOfFiles = arrayOfFiles || [];
-
   files.forEach(function(file) {
     const fullPath = path.join(dirPath, file);
     if (fs.statSync(fullPath).isDirectory()) {
-      // 只扫描特定的语种和内容文件夹，排除 dist, imgs, node_modules 等
       const includeDirs = ['ru', 'zh', 'news', 'dynamics', 'knowledge', 'products'];
       if (includeDirs.includes(file)) {
         arrayOfFiles = getAllHtmlFiles(fullPath, arrayOfFiles);
       }
     } else {
-      // 匹配所有 .html 文件，但排除模板文件
       if (file.endsWith(".html") && !file.startsWith('template')) {
-        // 格式化为 URL 路径，例如: /zh/index.html
         const urlPath = fullPath.replace(/\\/g, '/').replace(/^\./, '');
         arrayOfFiles.push(urlPath);
       }
     }
   });
-
   return arrayOfFiles;
 }
 
-// Sitemap 生成函数
+// Sitemap 生成函数 (保持不变)
 function generateSitemap(allEnArticles, allRuArticles) {
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
-  
-  // 1. 深度扫描本地所有 HTML 文件（含 zh, ru 目录）
   const staticUrls = getAllHtmlFiles('./');
-
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-
-  // 2. 写入扫描到的所有静态页面
   staticUrls.forEach(url => {
-    // 首页设置最高权重
     const priority = url.endsWith('index.html') ? '1.0' : '0.8';
     xml += `\n  <url><loc>${domain}${url}</loc><lastmod>${lastMod}</lastmod><priority>${priority}</priority></url>`;
   });
-
-  // 3. 写入从 Contentful 抓取的动态文章 (EN)
-  allEnArticles.forEach(item => {
+  [...allEnArticles, ...allRuArticles].forEach(item => {
     xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
   });
-
-  // 4. 写入从 Contentful 抓取的动态文章 (RU)
-  allRuArticles.forEach(item => {
-    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
-  });
-
   xml += `\n</urlset>`;
-  
-  // 确保写入 dist 根目录
   fs.writeFileSync('./dist/sitemap.xml', xml);
-  console.log(`🚀 Sitemap.xml 已补全生成！共包含 ${staticUrls.length + allEnArticles.length + allRuArticles.length} 个链接。`);
+  console.log(`🚀 Sitemap.xml 已补全生成！`);
 }
 
 async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
-
   let allEnForSitemap = [];
   let allRuForSitemap = [];
 
@@ -96,9 +71,12 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 1. 生成 data.json
+    // --- 修改点 1：在生成 data.json 时提取 imgAlt ---
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
+      // 提取你新增的 imgAlt 字段，如果没有填，则默认使用标题
+      const altText = item.fields.imgAlt || item.fields.title; 
+      
       if (!thumbUrl) {
         const randomNum = String(Math.floor(Math.random() * 43) + 1).padStart(2, '0');
         thumbUrl = `/imgs/article_imgs/${randomNum}.png`;
@@ -111,7 +89,8 @@ async function run() {
         summary: item.fields.summary || '', 
         date: item.fields.datedTime,
         url: articleUrl,
-        img: thumbUrl
+        img: thumbUrl,
+        alt: altText // 存入 JSON 供首页等调用
       };
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
@@ -119,7 +98,6 @@ async function run() {
     if (isEn) allEnForSitemap = indexData;
     else allRuForSitemap = indexData;
 
-    // 2. 生成详情页
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
@@ -132,8 +110,11 @@ async function run() {
 
     for (const [catName, items] of Object.entries(groups)) {
       items.forEach((item, i) => {
-        const { title, body, slug, datedTime } = item.fields;
+        // --- 修改点 2：在渲染详情页时提取 imgAlt 并执行替换 ---
+        const { title, body, slug, datedTime, imgAlt } = item.fields;
+        const currentAlt = imgAlt || title; // 备用方案：没填 Alt 就用标题
         const contentHtml = documentToHtmlString(body);
+        
         const nextPost = items[i - 1]; 
         const prevPost = items[i + 1];
         const domain = "https://www.mos-surfactant.com";
@@ -145,6 +126,7 @@ async function run() {
           .replace(/{{CONTENT}}/g, contentHtml)
           .replace(/{{DATE}}/g, datedTime)
           .replace(/{{SLUG}}/g, slug)
+          .replace(/{{IMG_ALT}}/g, currentAlt) // 替换模板中的图片 Alt 占位符
           .replace(/{{CATEGORY}}/g, catName)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
@@ -163,7 +145,6 @@ async function run() {
     }
   }
 
-  // 最终生成 Sitemap
   generateSitemap(allEnForSitemap, allRuForSitemap);
   console.log('所有语种及全量 Sitemap 生成完成！');
 }
