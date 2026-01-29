@@ -9,47 +9,54 @@ const client = contentful.createClient({
 
 const locales = ['en-US', 'ru'];
 
-// 静态页面配置（用于生成 Sitemap）
-const staticPages = [
-  'index.html', 'company.html', 'contact.html', 'culture.html', 
-  'dynamics.html', 'news.html', 'knowledge.html', 'products.html'
-];
+// --- 修改点：不再写死页面列表，改为自动扫描函数 ---
+function getStaticPages() {
+    // 扫描当前根目录下所有的 .html 文件，排除掉模板文件
+    return fs.readdirSync('./').filter(file => 
+        file.endsWith('.html') && 
+        !file.startsWith('template')
+    );
+}
 
-// Sitemap 生成函数
+// --- 修改后的 Sitemap 生成函数：全量覆盖扫描 ---
 function generateSitemap(allEnArticles, allRuArticles) {
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
+  
+  // 自动获取根目录所有的静态 HTML (包含 index, news, 甚至你之前的 zh 页面等)
+  const staticFiles = getStaticPages();
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
 
-  // 1. 添加静态页面（双语）
-  staticPages.forEach(page => {
-    // 英文根目录
+  // 1. 添加所有根目录下的静态页面链接
+  staticFiles.forEach(page => {
+    // 英文版
     xml += `\n  <url><loc>${domain}/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.8</priority></url>`;
-    // 俄文目录
+    // 尝试添加俄文版对应链接 (假设结构对称)
     xml += `\n  <url><loc>${domain}/ru/${page}</loc><lastmod>${lastMod}</lastmod><priority>0.7</priority></url>`;
   });
 
-  // 2. 添加动态文章（英文）
+  // 2. 添加 Contentful 动态文章（英文）
   allEnArticles.forEach(item => {
     xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
   });
 
-  // 3. 添加动态文章（俄文）
+  // 3. 添加 Contentful 动态文章（俄文）
   allRuArticles.forEach(item => {
-    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${item.date || lastMod}</lastmod><priority>0.6</priority></url>`;
+    xml += `\n  <url><loc>${domain}${item.url}</loc><lastmod>${lastMod}</lastmod><priority>0.6</priority></url>`;
   });
 
   xml += `\n</urlset>`;
+  
+  // 最终写入 dist 根目录
   fs.writeFileSync('./dist/sitemap.xml', xml);
-  console.log('🚀 Sitemap.xml 已成功生成至 dist 根目录');
+  console.log(`🚀 Sitemap.xml 已重新生成。共包含 ${staticFiles.length * 2 + allEnArticles.length + allRuArticles.length} 个链接。`);
 }
 
 async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist');
 
-  // 用于收集所有文章数据以生成 Sitemap
   let allEnForSitemap = [];
   let allRuForSitemap = [];
 
@@ -69,7 +76,6 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 1. 生成 data.json
     const indexData = allEntries.map(item => {
       let thumbUrl = item.fields.featuredImage?.fields?.file?.url;
       if (!thumbUrl) {
@@ -89,11 +95,9 @@ async function run() {
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
 
-    // 收集给 Sitemap 使用
     if (isEn) allEnForSitemap = indexData;
     else allRuForSitemap = indexData;
 
-    // 2. 生成详情页
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const template = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
@@ -137,7 +141,6 @@ async function run() {
     }
   }
 
-  // 最后一步：生成 Sitemap
   generateSitemap(allEnForSitemap, allRuForSitemap);
   console.log('所有语种及 Sitemap 生成完成！');
 }
