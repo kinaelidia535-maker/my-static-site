@@ -35,6 +35,6 @@ jobs:
 
       - name: Deploy to Aliyun OSS
         run: |
-          # 将 dist 文件夹内的 HTML 上传到 OSS 的 dynamics 文件夹下
-          # 如果你想直接传到根目录，就去掉路径末尾的 dynamics/
-          ossutil cp -r ./dist/ oss://mos-surfactant/dynamics/ -f
+          # 核心修改：将生成的全量目录（含 dynamics, news, knowledge）上传到 OSS 根路径
+          # -r 表示递归目录，-f 表示强制覆盖
+          ossutil cp -r ./dist/ oss://mos-surfactant/ -f
