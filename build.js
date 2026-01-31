@@ -23,82 +23,76 @@ function copyFolderSync(from, to) {
   });
 }
 
-// --- 工具函数：随机获取本地图片 (01-43.png) ---
+// --- 工具函数：随机获取本地图片 ---
 function getRandomLocalImage() {
   const randomNum = Math.floor(Math.random() * 43) + 1;
   const paddedNum = randomNum.toString().padStart(2, '0');
-  // 使用绝对路径，防止子目录引用失效
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 工具函数：深度递归扫描 HTML (修正版) ---
-function getAllHtmlFiles(dirPath, arrayOfFiles) {
-  const files = fs.readdirSync(dirPath);
-  arrayOfFiles = arrayOfFiles || [];
-
-  files.forEach(function(file) {
-    const fullPath = path.join(dirPath, file);
-    // 排除构建输出目录和依赖目录
-    if (file === 'dist' || file === 'node_modules' || file === '.git') return;
-
-    if (fs.statSync(fullPath).isDirectory()) {
-      arrayOfFiles = getAllHtmlFiles(fullPath, arrayOfFiles);
-    } else {
-      // 匹配 HTML 文件，排除模板文件
-      if (file.endsWith(".html") && !file.startsWith('template')) {
-        let urlPath = fullPath.replace(/\\/g, '/').replace(/^\./, '');
-        if (!urlPath.startsWith('/')) urlPath = '/' + urlPath;
-        arrayOfFiles.push(urlPath);
-      }
-    }
-  });
-  return arrayOfFiles;
-}
-
-// --- 工具函数：生成 Sitemap (带去重) ---
-function generateSitemap(allEnArticles, allRuArticles) {
+// --- 工具函数：追加式生成 Sitemap (核心修改) ---
+function updateSitemapAppended(allNewArticles) {
+  const sitemapPath = './sitemap.xml'; // 根目录下的原始文件
+  const distSitemapPath = './dist/sitemap.xml';
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
-  const urlSet = new Set();
+  
+  let existingUrls = new Set();
+  let urlEntries = [];
 
-  // 1. 添加所有静态页面 (根目录、ru、zh 等)
-  const staticUrls = getAllHtmlFiles('./');
-  staticUrls.forEach(url => urlSet.add(url));
+  // 1. 读取现有 sitemap.xml 内容 (如果存在)
+  if (fs.existsSync(sitemapPath)) {
+    const content = fs.readFileSync(sitemapPath, 'utf8');
+    // 使用正则简单提取现有的 <url> 部分
+    const urlRegex = /<url>[\s\S]*?<\/url>/g;
+    const matches = content.match(urlRegex) || [];
+    matches.forEach(m => {
+        // 提取 loc 标签内容用于去重判断
+        const locMatch = m.match(/<loc>(.*?)<\/loc>/);
+        if (locMatch) {
+            existingUrls.add(locMatch[1].trim());
+            urlEntries.push(m.trim());
+        }
+    });
+  }
 
-  // 2. 添加 Contentful 动态生成的页面
-  [...allEnArticles, ...allRuArticles].forEach(item => {
-    urlSet.add(item.url);
+  // 2. 将 Contentful 新生成的文章追加进去
+  allNewArticles.forEach(item => {
+    const fullUrl = `${domain}${item.url}`;
+    if (!existingUrls.has(fullUrl)) {
+      const newEntry = `  <url>\n    <loc>${fullUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <priority>0.8</priority>\n  </url>`;
+      urlEntries.push(newEntry);
+      existingUrls.add(fullUrl);
+    }
   });
 
+  // 3. 重新组装 XML
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-  urlSet.forEach(url => {
-    const priority = (url === '/index.html' || url === '/') ? '1.0' : '0.8';
-    xml += `\n  <url>\n    <loc>${domain}${url}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <priority>${priority}</priority>\n  </url>`;
-  });
+  xml += `\n${urlEntries.join('\n')}`;
   xml += `\n</urlset>`;
   
-  fs.writeFileSync('./dist/sitemap.xml', xml);
-  console.log(`✅ Sitemap 更新完成，共 ${urlSet.size} 个唯一页面。`);
+  // 同时写回根目录(保留更新)和写入 dist 目录(用于部署)
+  fs.writeFileSync(distSitemapPath, xml);
+  fs.writeFileSync(sitemapPath, xml); 
+  console.log(`✅ Sitemap 追加完成，当前总计 ${urlEntries.length} 个页面。`);
 }
 
 // --- 主运行函数 ---
 async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
 
-  // [重要] 构建前同步基础静态资源到 dist
+  // 基础资源拷贝
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
   });
   
-  // 拷贝根目录下的基础文件
   const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   filesToCopy.forEach(file => {
     if (fs.existsSync(`./${file}`)) fs.copyFileSync(`./${file}`, `./dist/${file}`);
   });
 
-  let allEnForSitemap = [];
-  let allRuForSitemap = [];
+  let allArticlesForSitemap = [];
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
@@ -118,8 +112,9 @@ async function run() {
 
     // 1. 生成 data.json
     const indexData = allEntries.map(item => {
-      const cat = (item.fields.category || 'dynamics').toLowerCase().trim();
-      const articleUrl = isEn ? `/${cat}/${item.fields.slug}.html` : `/ru/${cat}/${item.fields.slug}.html`;
+      const catRaw = (item.fields.category || 'dynamics').trim();
+      const catLower = catRaw.toLowerCase();
+      const articleUrl = isEn ? `/${catLower}/${item.fields.slug}.html` : `/ru/${catLower}/${item.fields.slug}.html`;
       
       let finalImg = '';
       const ctfImg = item.fields.featuredImage?.fields?.file?.url;
@@ -136,13 +131,13 @@ async function run() {
         url: articleUrl,
         img: finalImg,
         alt: item.fields.imgAlt || item.fields.title,
-        category: cat
+        category: catLower
       };
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
-
-    if (isEn) allEnForSitemap = indexData;
-    else allRuForSitemap = indexData;
+    
+    // 汇总所有文章用于更新 Sitemap
+    allArticlesForSitemap = allArticlesForSitemap.concat(indexData);
 
     // 2. 生成详情页 HTML
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
@@ -150,18 +145,20 @@ async function run() {
 
     const groups = {};
     allEntries.forEach(item => {
-      const cat = (item.fields.category || 'dynamics').toLowerCase().trim();
+      const cat = (item.fields.category || 'dynamics').trim();
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(item);
     });
 
-    for (const [catName, items] of Object.entries(groups)) {
+    for (const [catRaw, items] of Object.entries(groups)) {
       items.forEach((item, i) => {
-        const { title, body, slug, datedTime, imgAlt } = item.fields;
-        const currentAlt = imgAlt || title; 
+        const { title, body, slug, datedTime, imgAlt, summary } = item.fields;
         const contentHtml = documentToHtmlString(body);
+        const catLower = catRaw.toLowerCase();
+        const catUpper = catRaw.toUpperCase();
+        
         const domain = "https://www.mos-surfactant.com";
-        const sharePath = isEn ? `/${catName}/${slug}.html` : `/ru/${catName}/${slug}.html`;
+        const sharePath = isEn ? `/${catLower}/${slug}.html` : `/ru/${catLower}/${slug}.html`;
         const pageUrl = encodeURIComponent(`${domain}${sharePath}`);
 
         let html = templateContent
@@ -169,8 +166,11 @@ async function run() {
           .replace(/{{CONTENT}}/g, contentHtml)
           .replace(/{{DATE}}/g, datedTime)
           .replace(/{{SLUG}}/g, slug)
-          .replace(/{{IMG_ALT}}/g, currentAlt)
-          .replace(/{{CATEGORY}}/g, catName)
+          .replace(/{{IMG_ALT}}/g, imgAlt || title)
+          .replace(/{{SUMMARY}}/g, summary || title)
+          .replace(/{{CATEGORY}}/g, catRaw)
+          .replace(/{{CATEGORY_LOWER}}/g, catLower)
+          .replace(/{{CATEGORY_UPPER}}/g, catUpper)
           .replace(/{{ARTICLE_PATH}}/g, sharePath)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
@@ -184,15 +184,16 @@ async function run() {
                    .replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#')
                    .replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
 
-        const outDir = `${langBaseDir}/${catName}`;
+        const outDir = `${langBaseDir}/${catLower}`;
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(`${outDir}/${slug}.html`, html);
       });
     }
   }
 
-  generateSitemap(allEnForSitemap, allRuForSitemap);
-  console.log('🚀 构建完成！所有静态页面和动态内容已汇总至 dist 目录。');
+  // 执行追加式 Sitemap 更新
+  updateSitemapAppended(allArticlesForSitemap);
+  console.log('🚀 构建完成！');
 }
 
 run().catch(error => {
