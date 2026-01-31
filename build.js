@@ -37,20 +37,20 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 核心修改：追加式生成 Sitemap ---
+// --- 核心修改：追加式生成 Sitemap（新 URL 排在最前面） ---
 function updateSitemapAppended(allNewArticles) {
   const sourceSitemap = './sitemap1.xml';  // 原始备份文件
   const distSitemap = './dist/sitemap.xml'; // 部署用的标准文件名
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
   
-  let urlEntries = [];
+  let oldEntries = [];      // 存放已有记录
+  let newEntries = [];      // 存放本次发现的新记录
   let existingLocs = new Set();
 
-  // 1. 读取原始 sitemap1.xml 中的静态页面记录
+  // 1. 读取原始 sitemap1.xml 中的记录，用于去重和保留旧链接
   if (fs.existsSync(sourceSitemap)) {
     const content = fs.readFileSync(sourceSitemap, 'utf8');
-    // 匹配完整的 <url> 块
     const urlBlockRegex = /<url>[\s\S]*?<\/url>/g;
     const matches = content.match(urlBlockRegex) || [];
     
@@ -60,34 +60,35 @@ function updateSitemapAppended(allNewArticles) {
         const url = locMatch[1].trim();
         if (!existingLocs.has(url)) {
           existingLocs.add(url);
-          urlEntries.push(block.trim());
+          oldEntries.push(block.trim()); // 旧记录保持原样
         }
       }
     });
-    console.log(`已从 sitemap1.xml 加载 ${existingLocs.size} 条记录。`);
+    console.log(`已从 sitemap1.xml 加载 ${existingLocs.size} 条历史记录。`);
   }
 
-  // 2. 追加来自 Contentful 的新文章
+  // 2. 识别来自 Contentful 的新文章链接
   allNewArticles.forEach(item => {
     const fullUrl = `${domain}${item.url}`;
     if (!existingLocs.has(fullUrl)) {
       const newEntry = `  <url>\n    <loc>${fullUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <priority>0.8</priority>\n  </url>`;
-      urlEntries.push(newEntry);
+      newEntries.push(newEntry); // 新文章放入新数组
       existingLocs.add(fullUrl);
-      console.log(`新增 URL: ${fullUrl}`);
+      console.log(`新增 URL (置顶): ${fullUrl}`);
     }
   });
 
-  // 3. 重新组装 XML
+  // 3. 重新组装 XML：【关键】newEntries 在前，oldEntries 在后
   const finalXml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urlEntries.join('\n')}
+${newEntries.join('\n')}
+${oldEntries.join('\n')}
 </urlset>`;
   
-  // 4. 双写：保证下次构建有数据，且 dist 目录有标准文件
+  // 4. 双写更新：更新部署目录和根目录备份
   fs.writeFileSync(distSitemap, finalXml);
   fs.writeFileSync(sourceSitemap, finalXml); 
-  console.log(`✅ Sitemap 处理完成，共计 ${urlEntries.length} 条链接。`);
+  console.log(`✅ Sitemap 更新完成。本次置顶 ${newEntries.length} 条，总计 ${existingLocs.size} 条。`);
 }
 
 // --- 主运行函数 ---
@@ -100,7 +101,7 @@ async function run() {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
   });
   
-  // 拷贝根目录文件
+  // 拷贝基础静态文件
   const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   filesToCopy.forEach(file => {
     if (fs.existsSync(`./${file}`)) fs.copyFileSync(`./${file}`, `./dist/${file}`);
@@ -150,7 +151,7 @@ async function run() {
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
     
-    // 收集所有文章用于生成 sitemap
+    // 汇总所有语言的文章链接
     allArticlesForSitemap = allArticlesForSitemap.concat(indexData);
 
     // 2. 生成详情页 HTML
@@ -210,9 +211,9 @@ async function run() {
     }
   }
 
-  // 运行 Sitemap 追加逻辑
+  // 执行置顶式 Sitemap 追加
   updateSitemapAppended(allArticlesForSitemap);
-  console.log('🚀 构建完成！');
+  console.log('🚀 构建流程完美结束！');
 }
 
 run().catch(error => {
