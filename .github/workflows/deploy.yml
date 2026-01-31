@@ -9,9 +9,16 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # 给 Action 写入权限，以便推回 sitemap1.xml
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          # 取消默认的只读模式
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -26,6 +33,18 @@ jobs:
           CONTENTFUL_SPACE_ID: ${{ secrets.CONTENTFUL_SPACE_ID }}
           CONTENTFUL_ACCESS_TOKEN: ${{ secrets.CONTENTFUL_ACCESS_TOKEN }}
 
+      # --- 新增步骤：将更新后的 sitemap1.xml 存回仓库 ---
+      - name: Commit and Push Updated Sitemap
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 只针对 sitemap1.xml 进行添加，避免污染其他代码
+          git add sitemap1.xml
+          # 检查是否有文件变动，防止空提交报错
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update sitemap1.xml [skip ci]" && git push)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup ossutil
         uses: manyuanrong/setup-ossutil@v2.0
         with:
@@ -35,7 +54,6 @@ jobs:
 
       - name: Deploy to Aliyun OSS
         run: |
-          # 先在日志里打出目录结构，方便排查
           ls -R ./dist/
-          # 执行同步，建议加上 --update
+          # -f 强制覆盖，--update 仅上传更新的文件，提高效率
           ossutil cp -r ./dist/ oss://mos-surfactant/ -f --update
