@@ -10,6 +10,13 @@ const client = contentful.createClient({
 
 const locales = ['en-US', 'ru'];
 
+// --- 俄文分类翻译表 ---
+const ruCategoryMap = {
+    'dynamics': 'Динамика',
+    'knowledge': 'Знания',
+    'news': 'Новости'
+};
+
 // --- 工具函数：文件夹递归拷贝 ---
 function copyFolderSync(from, to) {
   if (!fs.existsSync(from)) return;
@@ -23,16 +30,16 @@ function copyFolderSync(from, to) {
   });
 }
 
-// --- 工具函数：随机获取本地图片 ---
+// --- 工具函数：随机图片 ---
 function getRandomLocalImage() {
   const randomNum = Math.floor(Math.random() * 43) + 1;
   const paddedNum = randomNum.toString().padStart(2, '0');
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 工具函数：追加式生成 Sitemap (核心修改) ---
+// --- 追加式生成 Sitemap ---
 function updateSitemapAppended(allNewArticles) {
-  const sitemapPath = './sitemap.xml'; // 根目录下的原始文件
+  const sitemapPath = './sitemap.xml';
   const distSitemapPath = './dist/sitemap.xml';
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
@@ -40,14 +47,11 @@ function updateSitemapAppended(allNewArticles) {
   let existingUrls = new Set();
   let urlEntries = [];
 
-  // 1. 读取现有 sitemap.xml 内容 (如果存在)
   if (fs.existsSync(sitemapPath)) {
     const content = fs.readFileSync(sitemapPath, 'utf8');
-    // 使用正则简单提取现有的 <url> 部分
     const urlRegex = /<url>[\s\S]*?<\/url>/g;
     const matches = content.match(urlRegex) || [];
     matches.forEach(m => {
-        // 提取 loc 标签内容用于去重判断
         const locMatch = m.match(/<loc>(.*?)<\/loc>/);
         if (locMatch) {
             existingUrls.add(locMatch[1].trim());
@@ -56,7 +60,6 @@ function updateSitemapAppended(allNewArticles) {
     });
   }
 
-  // 2. 将 Contentful 新生成的文章追加进去
   allNewArticles.forEach(item => {
     const fullUrl = `${domain}${item.url}`;
     if (!existingUrls.has(fullUrl)) {
@@ -66,22 +69,18 @@ function updateSitemapAppended(allNewArticles) {
     }
   });
 
-  // 3. 重新组装 XML
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
   xml += `\n${urlEntries.join('\n')}`;
   xml += `\n</urlset>`;
   
-  // 同时写回根目录(保留更新)和写入 dist 目录(用于部署)
   fs.writeFileSync(distSitemapPath, xml);
   fs.writeFileSync(sitemapPath, xml); 
-  console.log(`✅ Sitemap 追加完成，当前总计 ${urlEntries.length} 个页面。`);
 }
 
 // --- 主运行函数 ---
 async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
 
-  // 基础资源拷贝
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
@@ -135,8 +134,6 @@ async function run() {
       };
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
-    
-    // 汇总所有文章用于更新 Sitemap
     allArticlesForSitemap = allArticlesForSitemap.concat(indexData);
 
     // 2. 生成详情页 HTML
@@ -154,8 +151,17 @@ async function run() {
       items.forEach((item, i) => {
         const { title, body, slug, datedTime, imgAlt, summary } = item.fields;
         const contentHtml = documentToHtmlString(body);
+        
+        // --- 核心逻辑：处理多语言分类显示 ---
         const catLower = catRaw.toLowerCase();
-        const catUpper = catRaw.toUpperCase();
+        let catDisplay = catRaw; 
+
+        if (!isEn) {
+            // 如果是俄文环境，尝试查找俄文翻译
+            catDisplay = ruCategoryMap[catLower] || catRaw;
+        }
+
+        const catUpper = catDisplay.toUpperCase();
         
         const domain = "https://www.mos-surfactant.com";
         const sharePath = isEn ? `/${catLower}/${slug}.html` : `/ru/${catLower}/${slug}.html`;
@@ -169,8 +175,8 @@ async function run() {
           .replace(/{{IMG_ALT}}/g, imgAlt || title)
           .replace(/{{SUMMARY}}/g, summary || title)
           .replace(/{{CATEGORY}}/g, catRaw)
-          .replace(/{{CATEGORY_LOWER}}/g, catLower)
-          .replace(/{{CATEGORY_UPPER}}/g, catUpper)
+          .replace(/{{CATEGORY_LOWER}}/g, catLower)      // 永远是英文小写，用于链接
+          .replace(/{{CATEGORY_UPPER}}/g, catUpper)      // 英文时大写，俄文时为俄语
           .replace(/{{ARTICLE_PATH}}/g, sharePath)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
@@ -191,9 +197,8 @@ async function run() {
     }
   }
 
-  // 执行追加式 Sitemap 更新
   updateSitemapAppended(allArticlesForSitemap);
-  console.log('🚀 构建完成！');
+  console.log('🚀 构建完成！分类已适配俄文显示。');
 }
 
 run().catch(error => {
