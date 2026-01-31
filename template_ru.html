@@ -61,8 +61,8 @@
                         <a href="../contact.html" class="nav-link">Связаться с нами</a>
                     </li>
                     <li class="nav-item language-switch">
-<a class="nav-link lang-link" href="../../zh/news/201.html"><img alt="ZH" class="flag-icon" src="../../flags/china-flag.svg" loading="lazy"><span class="flag-label">Chinese</span></a>
-<a class="nav-link lang-link" href="../../news/201.html"><img alt="EN" class="flag-icon" src="../../flags/uk-flag.svg" loading="lazy"><span class="flag-label">English</span></a>
+<a class="nav-link lang-link" href="../../zh/{{CATEGORY_LOWER}}.html"><img alt="ZH" class="flag-icon" src="../../flags/china-flag.svg" loading="lazy"><span class="flag-label">Chinese</span></a>
+<a class="nav-link lang-link" href="../../{{CATEGORY_LOWER}}/{{SLUG}}.html"><img alt="EN" class="flag-icon" src="../../flags/uk-flag.svg" loading="lazy"><span class="flag-label">English</span></a>
 </li>
                     
                     
@@ -84,12 +84,12 @@
                 <div class="breadcrumb">
                     <a href="../index.html">Главная</a>
                     <span>/</span>
-                    <a href="../dynamics.html">Отраслевые тренды</a>
+                    <a href="../{{CATEGORY}}.html">{{CATEGORY}}</a>
                     <span>/</span>
                     <span>{{TITLE}}</span>
                 </div>
-                <h1>Отраслевые тренды</h1>
-                <p>SURFACTANTS DYNAMICS</p>
+                <h1>{{CATEGORY_UPPER}}</h1>
+                <p>ПАВ {{CATEGORY_UPPER}}</p>
             </div>
         </section>
 
@@ -108,7 +108,7 @@
                         </span>
                         <span class="meta-item-ref">
                             <span class="meta-label-ref">Раздел:</span>
-                            <span class="meta-value-ref">Отраслевые тренды</span>
+                            <span class="meta-value-ref">{{CATEGORY}}</span>
                         </span>
                     </div>
 
@@ -141,9 +141,6 @@
                             </a>
                             <a class="share-icon-ref" href="{{WHATSAPP_SHARE}}" target="_blank" title="WhatsApp">
                                 <i class="fab fa-whatsapp"></i>
-                            </a>
-                            <a class="share-icon-ref" href="{{TWITTER_SHARE}}" target="_blank" title="X">
-                                <i class="fab fa-x-twitter"></i>
                             </a>
                         </div>
                     </div>
@@ -230,4 +227,3 @@
 
 </body>
 </html>
-
