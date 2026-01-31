@@ -37,55 +37,70 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 追加式生成 Sitemap ---
+// --- 核心修改：追加式生成 Sitemap ---
 function updateSitemapAppended(allNewArticles) {
-  const sitemapPath = './sitemap.xml';
-  const distSitemapPath = './dist/sitemap.xml';
+  const sourceSitemap = './sitemap1.xml';  // 原始备份文件
+  const distSitemap = './dist/sitemap.xml'; // 部署用的标准文件名
   const domain = 'https://www.mos-surfactant.com';
   const lastMod = new Date().toISOString().split('T')[0];
   
-  let existingUrls = new Set();
   let urlEntries = [];
+  let existingLocs = new Set();
 
-  if (fs.existsSync(sitemapPath)) {
-    const content = fs.readFileSync(sitemapPath, 'utf8');
-    const urlRegex = /<url>[\s\S]*?<\/url>/g;
-    const matches = content.match(urlRegex) || [];
-    matches.forEach(m => {
-        const locMatch = m.match(/<loc>(.*?)<\/loc>/);
-        if (locMatch) {
-            existingUrls.add(locMatch[1].trim());
-            urlEntries.push(m.trim());
+  // 1. 读取原始 sitemap1.xml 中的静态页面记录
+  if (fs.existsSync(sourceSitemap)) {
+    const content = fs.readFileSync(sourceSitemap, 'utf8');
+    // 匹配完整的 <url> 块
+    const urlBlockRegex = /<url>[\s\S]*?<\/url>/g;
+    const matches = content.match(urlBlockRegex) || [];
+    
+    matches.forEach(block => {
+      const locMatch = block.match(/<loc>(.*?)<\/loc>/);
+      if (locMatch) {
+        const url = locMatch[1].trim();
+        if (!existingLocs.has(url)) {
+          existingLocs.add(url);
+          urlEntries.push(block.trim());
         }
+      }
     });
+    console.log(`已从 sitemap1.xml 加载 ${existingLocs.size} 条记录。`);
   }
 
+  // 2. 追加来自 Contentful 的新文章
   allNewArticles.forEach(item => {
     const fullUrl = `${domain}${item.url}`;
-    if (!existingUrls.has(fullUrl)) {
+    if (!existingLocs.has(fullUrl)) {
       const newEntry = `  <url>\n    <loc>${fullUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <priority>0.8</priority>\n  </url>`;
       urlEntries.push(newEntry);
-      existingUrls.add(fullUrl);
+      existingLocs.add(fullUrl);
+      console.log(`新增 URL: ${fullUrl}`);
     }
   });
 
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-  xml += `\n${urlEntries.join('\n')}`;
-  xml += `\n</urlset>`;
+  // 3. 重新组装 XML
+  const finalXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urlEntries.join('\n')}
+</urlset>`;
   
-  fs.writeFileSync(distSitemapPath, xml);
-  fs.writeFileSync(sitemapPath, xml); 
+  // 4. 双写：保证下次构建有数据，且 dist 目录有标准文件
+  fs.writeFileSync(distSitemap, finalXml);
+  fs.writeFileSync(sourceSitemap, finalXml); 
+  console.log(`✅ Sitemap 处理完成，共计 ${urlEntries.length} 条链接。`);
 }
 
 // --- 主运行函数 ---
 async function run() {
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
 
+  // 拷贝资源文件夹
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
   });
   
+  // 拷贝根目录文件
   const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   filesToCopy.forEach(file => {
     if (fs.existsSync(`./${file}`)) fs.copyFileSync(`./${file}`, `./dist/${file}`);
@@ -134,6 +149,8 @@ async function run() {
       };
     });
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(indexData));
+    
+    // 收集所有文章用于生成 sitemap
     allArticlesForSitemap = allArticlesForSitemap.concat(indexData);
 
     // 2. 生成详情页 HTML
@@ -152,15 +169,11 @@ async function run() {
         const { title, body, slug, datedTime, imgAlt, summary } = item.fields;
         const contentHtml = documentToHtmlString(body);
         
-        // --- 核心逻辑：处理多语言分类显示 ---
         const catLower = catRaw.toLowerCase();
         let catDisplay = catRaw; 
-
         if (!isEn) {
-            // 如果是俄文环境，尝试查找俄文翻译
             catDisplay = ruCategoryMap[catLower] || catRaw;
         }
-
         const catUpper = catDisplay.toUpperCase();
         
         const domain = "https://www.mos-surfactant.com";
@@ -175,8 +188,8 @@ async function run() {
           .replace(/{{IMG_ALT}}/g, imgAlt || title)
           .replace(/{{SUMMARY}}/g, summary || title)
           .replace(/{{CATEGORY}}/g, catRaw)
-          .replace(/{{CATEGORY_LOWER}}/g, catLower)      // 永远是英文小写，用于链接
-          .replace(/{{CATEGORY_UPPER}}/g, catUpper)      // 英文时大写，俄文时为俄语
+          .replace(/{{CATEGORY_LOWER}}/g, catLower)
+          .replace(/{{CATEGORY_UPPER}}/g, catUpper)
           .replace(/{{ARTICLE_PATH}}/g, sharePath)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
@@ -197,8 +210,9 @@ async function run() {
     }
   }
 
+  // 运行 Sitemap 追加逻辑
   updateSitemapAppended(allArticlesForSitemap);
-  console.log('🚀 构建完成！分类已适配俄文显示。');
+  console.log('🚀 构建完成！');
 }
 
 run().catch(error => {
