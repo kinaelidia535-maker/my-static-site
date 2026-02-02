@@ -84,11 +84,16 @@ function updateSitemapAppended(allNewArticles) {
 
 // --- 主运行函数 ---
 async function run() {
+  // 1. 初始化 dist 目录
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
 
+  // 2. 先拷贝所有静态资源 (关键：必须在生成 JSON 之前拷贝)
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
-    if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
+    if (fs.existsSync(`./${folder}`)) {
+        console.log(`正在拷贝静态文件夹: ${folder}`);
+        copyFolderSync(`./${folder}`, `./dist/${folder}`);
+    }
   });
   
   const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
@@ -98,7 +103,7 @@ async function run() {
 
   let totalArticlesForSitemap = [];
 
-  // 【适配新版本 SDK】：使用 withAllLocales 获取全部语言数据
+  // 3. 从 Contentful 获取数据
   console.log(`正在从 Contentful 获取全量语言数据...`);
   const response = await client.withAllLocales.getEntries({ 
     content_type: 'master', 
@@ -108,39 +113,37 @@ async function run() {
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langLabel = isEn ? "English" : "Russian";
-    console.log(`\n--- 正在构建 ${langLabel} 站点 ---`);
+    
+    // 【确定目标目录】：英语写在 ./dist/，俄语写在 ./dist/ru/
+    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
+    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 【精准隔离】：只筛选出在该 locale 下确实有 title 的条目
+    console.log(`\n--- 正在构建 ${langLabel} 站点内容 ---`);
+
+    // 过滤并处理当前语言的数据
     const validEntries = response.items.filter(item => {
-        // 新版本中，字段结构为 item.fields.title[locale]
         return item.fields && item.fields.title && item.fields.title[locale];
     }).map(item => {
-        // 扁平化处理：将当前 locale 的值提取出来，方便后面代码使用
         const flattenedFields = {};
         Object.keys(item.fields).forEach(key => {
             flattenedFields[key] = item.fields[key][locale] || '';
         });
-        // 处理特殊的图片资产对象结构
         const featuredImage = item.fields.featuredImage ? item.fields.featuredImage[locale] : null;
         return { ...item, fields: flattenedFields, featuredImageRaw: featuredImage };
     });
 
     if (validEntries.length === 0) {
-        console.log(`⚠️  ${langLabel} 没有任何专属文章，跳过该语言目录生成。`);
+        console.log(`⚠️  ${langLabel} 没有任何专属文章，跳过数据写入。`);
         continue;
     }
 
-    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
-    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
-
-    // 1. 生成 data.json
+    // 4. 生成 data.json 数据数组
     const langData = validEntries.map(item => {
       const catRaw = (item.fields.category || 'dynamics').trim();
       const catLower = catRaw.toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${item.fields.slug}.html` : `/ru/${catLower}/${item.fields.slug}.html`;
       
       let finalImg = '';
-      // 处理 Contentful 的资产 URL
       const ctfImg = item.featuredImageRaw?.fields?.file?.url;
       if (ctfImg) {
         finalImg = ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg;
@@ -159,12 +162,14 @@ async function run() {
       };
     });
 
-    fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(langData));
-    console.log(`✅ ${langLabel} 数据索引已保存: ${langBaseDir}/data.json (${langData.length} 篇文章)`);
+    // 【精准写入】：如果是俄文，文件会保存到 ./dist/ru/data.json
+    const jsonPath = path.join(langBaseDir, 'data.json');
+    fs.writeFileSync(jsonPath, JSON.stringify(langData, null, 2));
+    console.log(`✅ ${langLabel} 数据索引已保存: ${jsonPath} (${langData.length} 篇文章)`);
     
     totalArticlesForSitemap = totalArticlesForSitemap.concat(langData);
 
-    // 2. 生成详情页 HTML
+    // 5. 生成详情页 HTML
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
