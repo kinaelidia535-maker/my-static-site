@@ -38,7 +38,7 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 核心逻辑：追加式生成 Sitemap（置顶新 URL） ---
+// --- 核心逻辑：追加式生成 Sitemap ---
 function updateSitemapAppended(allNewArticles) {
   const sourceSitemap = './sitemap1.xml'; 
   const distSitemap = './dist/sitemap.xml'; 
@@ -84,15 +84,12 @@ ${oldEntries.join('\n')}
   
   fs.writeFileSync(distSitemap, finalXml);
   fs.writeFileSync(sourceSitemap, finalXml); 
-  console.log(`✅ Sitemap 处理完成：共计 ${existingLocs.size} 条链接。`);
 }
 
 // --- 主运行函数 ---
 async function run() {
-  // 清理并创建 dist
   if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
 
-  // 1. 拷贝静态资源
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
@@ -105,38 +102,45 @@ async function run() {
 
   let totalArticlesForSitemap = [];
 
-  // 2. 循环处理不同语言
   for (const locale of locales) {
     const isEn = locale === 'en-US';
-    const langLabel = isEn ? "English" : "Russian";
-    console.log(`\n--- 正在构建 ${langLabel} 站点 ---`);
+    console.log(`\n--- 正在处理 [${locale}] 站点 ---`);
 
+    // 使用 select 限制返回字段，并强制禁用回溯（如果 API 支持）
+    // 重点：我们请求原始数据（locale: '*'），以便手动判断内容归属
     const response = await client.getEntries({ 
       content_type: 'master', 
-      locale: locale, 
+      locale: '*', // 获取所有语言数据进行精确判定
       order: '-sys.createdAt' 
     });
     
-    // 【核心修正】：语言隔离过滤
-    // 只有当条目在当前 locale 下拥有真正的标题时，才允许进入该语言的站点数据
+    // 【深度修正逻辑】：
+    // 遍历所有条目，只有当该条目在“当前目标语言”下确实有值时才处理
     const validEntries = response.items.filter(item => {
-        // 关键：检查该字段是否在该语言下真实存在（防止 Fallback 机制污染）
-        return item.fields && item.fields.title && item.fields.title.trim() !== "";
+        // 检查 fields.title 下是否有当前 locale 的 key
+        // 例如：item.fields.title['en-US'] 是否存在
+        return item.fields.title && item.fields.title[locale];
+    }).map(item => {
+        // 将数据扁平化，方便后续模板使用
+        const flattenedFields = {};
+        Object.keys(item.fields).forEach(key => {
+            flattenedFields[key] = item.fields[key][locale];
+        });
+        return { ...item, fields: flattenedFields };
     });
 
     if (validEntries.length === 0) {
-        console.log(`⚠️  ${langLabel} 没有任何有效文章，跳过。`);
+        console.log(`⚠️  [${locale}] 没有发现专属内容，跳过。`);
         continue;
     }
 
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // A. 准备 data.json 数据
+    // 1. 生成 data.json
     const langData = validEntries.map(item => {
       const catRaw = (item.fields.category || 'dynamics').trim();
       const catLower = catRaw.toLowerCase();
-      // 根据语言确定 URL 路径前缀
       const articleUrl = isEn ? `/${catLower}/${item.fields.slug}.html` : `/ru/${catLower}/${item.fields.slug}.html`;
       
       let finalImg = '';
@@ -158,14 +162,12 @@ async function run() {
       };
     });
 
-    // 写入对应的物理目录
     fs.writeFileSync(`${langBaseDir}/data.json`, JSON.stringify(langData));
-    console.log(`✅ ${langLabel} 数据索引已保存: ${langBaseDir}/data.json (${langData.length} 篇文章)`);
+    console.log(`✅ 已写入: ${langBaseDir}/data.json (${langData.length} 条记录)`);
     
-    // 汇总给 Sitemap
     totalArticlesForSitemap = totalArticlesForSitemap.concat(langData);
 
-    // B. 生成详情页 HTML
+    // 2. 生成 HTML
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
@@ -182,10 +184,8 @@ async function run() {
         const contentHtml = documentToHtmlString(body);
         const catLower = catRaw.toLowerCase();
         
-        // 分类翻译
         let catDisplay = catRaw; 
         if (!isEn) catDisplay = ruCategoryMap[catLower] || catRaw;
-        const catUpper = catDisplay.toUpperCase();
         
         const domain = "https://www.mos-surfactant.com";
         const sharePath = isEn ? `/${catLower}/${slug}.html` : `/ru/${catLower}/${slug}.html`;
@@ -198,16 +198,14 @@ async function run() {
           .replace(/{{SLUG}}/g, slug)
           .replace(/{{IMG_ALT}}/g, imgAlt || title)
           .replace(/{{SUMMARY}}/g, summary || title)
-          .replace(/{{CATEGORY}}/g, catRaw)
           .replace(/{{CATEGORY_LOWER}}/g, catLower)
-          .replace(/{{CATEGORY_UPPER}}/g, catUpper)
+          .replace(/{{CATEGORY_UPPER}}/g, catDisplay.toUpperCase())
           .replace(/{{ARTICLE_PATH}}/g, sharePath)
           .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
           .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
           .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodeURIComponent(title)}%20${pageUrl}`)
           .replace(/{{TWITTER_SHARE}}/g, `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${pageUrl}`);
 
-        // 上下篇逻辑
         const nextPost = items[i - 1]; 
         const prevPost = items[i + 1];
         html = html.replace('{{PREV_LINK}}', prevPost ? `${prevPost.fields.slug}.html` : '#')
@@ -222,12 +220,11 @@ async function run() {
     }
   }
 
-  // 3. 生成 Sitemap
   updateSitemapAppended(totalArticlesForSitemap);
-  console.log('\n🚀 [Build Complete] 英俄双站物理隔离构建已圆满结束！');
+  console.log('\n🚀 构建成功：英俄内容已物理隔离。');
 }
 
 run().catch(error => {
-    console.error("❌ 构建过程中出现致命错误:", error);
+    console.error("❌ 错误:", error);
     process.exit(1);
 });
