@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { documentToHtmlString } = require('@contentful/rich-text-html-renderer');
 
-// --- 1. 客户端配置 ---
+// --- 1. 配置 ---
 const client = contentful.createClient({
   space: process.env.CONTENTFUL_SPACE_ID,
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
@@ -11,7 +11,6 @@ const client = contentful.createClient({
 
 const locales = ['en-US', 'ru'];
 
-// 俄文分类显示名映射（用于详情页面包屑或标题）
 const ruCategoryMap = {
     'dynamics': 'Динамика',
     'knowledge': 'Знания',
@@ -19,8 +18,6 @@ const ruCategoryMap = {
 };
 
 // --- 2. 工具函数 ---
-
-// 递归拷贝文件夹
 function copyFolderSync(from, to) {
   if (!fs.existsSync(from)) return;
   if (!fs.existsSync(to)) fs.mkdirSync(to, { recursive: true });
@@ -35,20 +32,19 @@ function copyFolderSync(from, to) {
   });
 }
 
-// 随机图片兜底
 function getRandomLocalImage() {
   const randomNum = Math.floor(Math.random() * 43) + 1;
   const paddedNum = randomNum.toString().padStart(2, '0');
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 3. 主运行逻辑 ---
+// --- 3. 主运行函数 ---
 async function run() {
-  // 清理并创建 dist 目录
+  // 初始化 dist
   if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
   fs.mkdirSync('./dist', { recursive: true });
 
-  // 拷贝所有静态资源
+  // 拷贝资源
   const assets = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh', 'script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   assets.forEach(asset => {
     const src = `./${asset}`;
@@ -58,14 +54,14 @@ async function run() {
     }
   });
 
-  // 【核心数据池】：存放所有语言的文章
-  let allCombinedData = []; 
+  let allCombinedData = []; // 用于生成根目录的总 data.json
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
-    console.log(`[${locale}] 正在处理数据...`);
+    console.log(`正在处理语言分支: ${locale}`);
 
+    // 获取当前语言的数据
     const response = await client.getEntries({ 
       content_type: 'master', 
       locale: locale, 
@@ -74,42 +70,46 @@ async function run() {
     
     if (response.items.length === 0) continue;
 
-    // A. 加工数据，用于生成 data.json
-    const processedData = response.items.map(item => {
-      const fields = item.fields;
-      const catLower = (fields.category || 'dynamics').trim().toLowerCase();
+    // 【核心修正 A】：根据语言确定物理存放的根目录
+    // 英文存放在 ./dist/dynamics...
+    // 俄文存放在 ./dist/ru/dynamics...
+    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
+    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
+
+    // 处理数据用于 JSON
+    const langData = response.items.map(item => {
+      const f = item.fields;
+      const catLower = (f.category || 'dynamics').trim().toLowerCase();
+      // 这里的 URL 必须带 /ru/ 前缀给俄语
+      const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
-      // 根据语言生成不同的 URL 路径
-      const articleUrl = isEn ? `/${catLower}/${fields.slug}.html` : `/ru/${catLower}/${fields.slug}.html`;
-      
-      // 图片处理
       let finalImg = getRandomLocalImage();
-      const ctfImg = fields.featuredImage?.fields?.file?.url;
+      const ctfImg = f.featuredImage?.fields?.file?.url;
       if (ctfImg) finalImg = ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg;
 
       return {
-        title: fields.title,
-        summary: fields.summary || '', 
-        date: fields.datedTime,
+        title: f.title,
+        summary: f.summary || '', 
+        date: f.datedTime,
         url: articleUrl,
         img: finalImg,
-        alt: fields.imgAlt || fields.title,
+        alt: f.imgAlt || f.title,
         category: catLower,
-        lang: langKey // 写入 lang 字段，方便前端过滤
+        lang: langKey
       };
     });
 
-    // 合并到全量池
-    allCombinedData = allCombinedData.concat(processedData);
+    allCombinedData = allCombinedData.concat(langData);
 
-    // B. 生成物理 HTML 详情页
-    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
+    // 【核心修正 B】：生成物理 HTML 文件
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     response.items.forEach(item => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
+      
+      // 确保文件夹路径正确：./dist/ru/news 或 ./dist/news
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -117,18 +117,20 @@ async function run() {
       const html = templateContent
         .replace(/{{TITLE}}/g, f.title)
         .replace(/{{CONTENT}}/g, contentHtml)
-        .replace(/{{DATE}}/g, f.datedTime);
+        .replace(/{{DATE}}/g, f.datedTime)
+        .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase());
 
+      // 写入文件
       fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
     });
   }
 
-  // C. 【关键输出】：在根目录生成唯一的全量 JSON 文件
+  // 生成统一的 data.json 供列表页使用
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 成功！全量 data.json 已生成，共 ${allCombinedData.length} 条记录。`);
+  console.log(`✅ 构建成功！全量 data.json 已包含 ${allCombinedData.length} 条记录。`);
 }
 
 run().catch(err => {
-  console.error("❌ 构建过程中出错:", err);
+  console.error("❌ 错误:", err);
   process.exit(1);
 });
