@@ -70,22 +70,28 @@ async function run() {
     
     if (response.items.length === 0) continue;
 
-    // 【核心修正 A】：根据语言确定物理存放的根目录
-    // 英文存放在 ./dist/dynamics...
-    // 俄文存放在 ./dist/ru/dynamics...
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 处理数据用于 JSON
+    // --- 修正 A：处理数据用于 JSON，并过滤掉无效条目 ---
     const langData = response.items.map(item => {
       const f = item.fields;
+
+      // 如果没有标题或没有 slug，说明是该语言下的空条目（幽灵数据），直接跳过
+      if (!f.title || !f.slug) return null;
+
       const catLower = (f.category || 'dynamics').trim().toLowerCase();
       // 这里的 URL 必须带 /ru/ 前缀给俄语
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
-      let finalImg = getRandomLocalImage();
+      // 修正图片逻辑：优先取上传的图，没有才随机
+      let finalImg = "";
       const ctfImg = f.featuredImage?.fields?.file?.url;
-      if (ctfImg) finalImg = ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg;
+      if (ctfImg) {
+        finalImg = ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg;
+      } else {
+        finalImg = getRandomLocalImage();
+      }
 
       return {
         title: f.title,
@@ -97,19 +103,23 @@ async function run() {
         category: catLower,
         lang: langKey
       };
-    });
+    }).filter(Boolean); // 剔除 null 条目
 
     allCombinedData = allCombinedData.concat(langData);
 
-    // 【核心修正 B】：生成物理 HTML 文件
+    // --- 修正 B：生成物理 HTML 文件时增加校验 ---
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     response.items.forEach(item => {
       const f = item.fields;
+      
+      // 只有标题和分类都存在的有效内容才生成 HTML
+      if (!f.title || !f.category || !f.slug) return;
+
       const catLower = f.category.trim().toLowerCase();
       
-      // 确保文件夹路径正确：./dist/ru/news 或 ./dist/news
+      // 确保文件夹路径正确
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -125,9 +135,9 @@ async function run() {
     });
   }
 
-  // 生成统一的 data.json 供列表页使用
+  // 生成统一的 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 构建成功！全量 data.json 已包含 ${allCombinedData.length} 条记录。`);
+  console.log(`✅ 构建成功！全量 data.json 已清洗，包含 ${allCombinedData.length} 条有效记录。`);
 }
 
 run().catch(err => {
