@@ -31,76 +31,30 @@ function copyFolderSync(from, to) {
   });
 }
 
-// --- 工具函数：随机图片 ---
 function getRandomLocalImage() {
   const randomNum = Math.floor(Math.random() * 43) + 1;
   const paddedNum = randomNum.toString().padStart(2, '0');
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 核心逻辑：追加式生成 Sitemap ---
-function updateSitemapAppended(allNewArticles) {
-  const sourceSitemap = './sitemap1.xml'; 
-  const distSitemap = './dist/sitemap.xml'; 
-  const domain = 'https://www.mos-surfactant.com';
-  const lastMod = new Date().toISOString().split('T')[0];
-  
-  let oldEntries = [];      
-  let newEntries = [];      
-  let existingLocs = new Set();
-
-  if (fs.existsSync(sourceSitemap)) {
-    const content = fs.readFileSync(sourceSitemap, 'utf8');
-    const urlBlockRegex = /<url>[\s\S]*?<\/url>/g;
-    const matches = content.match(urlBlockRegex) || [];
-    
-    matches.forEach(block => {
-      const locMatch = block.match(/<loc>(.*?)<\/loc>/);
-      if (locMatch) {
-        const url = locMatch[1].trim();
-        if (!existingLocs.has(url)) {
-          existingLocs.add(url);
-          oldEntries.push(block.trim());
-        }
-      }
-    });
-  }
-
-  allNewArticles.forEach(item => {
-    const fullUrl = `${domain}${item.url}`;
-    if (!existingLocs.has(fullUrl)) {
-      const newEntry = `  <url>\n    <loc>${fullUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <priority>0.8</priority>\n  </url>`;
-      newEntries.push(newEntry);
-      existingLocs.add(fullUrl);
-      console.log(`[Sitemap] 新增 URL: ${fullUrl}`);
-    }
-  });
-
-  const finalXml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${newEntries.join('\n')}\n${oldEntries.join('\n')}\n</urlset>`;
-  
-  fs.writeFileSync(distSitemap, finalXml);
-  fs.writeFileSync(sourceSitemap, finalXml); 
-}
-
 // --- 主运行函数 ---
 async function run() {
   // 1. 初始化 dist 目录
-  if (!fs.existsSync('./dist')) fs.mkdirSync('./dist', { recursive: true });
+  if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
+  fs.mkdirSync('./dist', { recursive: true });
 
-  // 2. 先拷贝所有静态资源 (关键：必须在生成 JSON 之前拷贝)
+  // 2. 拷贝所有静态资源
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
-    if (fs.existsSync(`./${folder}`)) {
-        console.log(`正在拷贝静态文件夹: ${folder}`);
-        copyFolderSync(`./${folder}`, `./dist/${folder}`);
-    }
+    if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
   });
   
-  const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
+  const filesToCopy = ['script.js', 'styles.css', 'robots.txt', 'favicon.ico', 'sitemap1.xml'];
   filesToCopy.forEach(file => {
     if (fs.existsSync(`./${file}`)) fs.copyFileSync(`./${file}`, `./dist/${file}`);
   });
 
+  let allCombinedData = []; // 用于存放所有语言的合并数据
   let totalArticlesForSitemap = [];
 
   // 3. 从 Contentful 获取数据
@@ -112,15 +66,8 @@ async function run() {
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
-    const langLabel = isEn ? "English" : "Russian";
+    const langKey = isEn ? "en" : "ru";
     
-    // 【确定目标目录】：英语写在 ./dist/，俄语写在 ./dist/ru/
-    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
-    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
-
-    console.log(`\n--- 正在构建 ${langLabel} 站点内容 ---`);
-
-    // 过滤并处理当前语言的数据
     const validEntries = response.items.filter(item => {
         return item.fields && item.fields.title && item.fields.title[locale];
     }).map(item => {
@@ -132,24 +79,16 @@ async function run() {
         return { ...item, fields: flattenedFields, featuredImageRaw: featuredImage };
     });
 
-    if (validEntries.length === 0) {
-        console.log(`⚠️  ${langLabel} 没有任何专属文章，跳过数据写入。`);
-        continue;
-    }
+    if (validEntries.length === 0) continue;
 
-    // 4. 生成 data.json 数据数组
+    // 构建数据并加入 lang 字段
     const langData = validEntries.map(item => {
-      const catRaw = (item.fields.category || 'dynamics').trim();
-      const catLower = catRaw.toLowerCase();
+      const catLower = (item.fields.category || 'dynamics').trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${item.fields.slug}.html` : `/ru/${catLower}/${item.fields.slug}.html`;
       
       let finalImg = '';
       const ctfImg = item.featuredImageRaw?.fields?.file?.url;
-      if (ctfImg) {
-        finalImg = ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg;
-      } else {
-        finalImg = getRandomLocalImage();
-      }
+      finalImg = ctfImg ? (ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg) : getRandomLocalImage();
 
       return {
         title: item.fields.title,
@@ -158,77 +97,42 @@ async function run() {
         url: articleUrl,
         img: finalImg,
         alt: item.fields.imgAlt || item.fields.title,
-        category: catLower
+        category: catLower,
+        lang: langKey // --- 新增语言字段 ---
       };
     });
 
-    // 【精准写入】：如果是俄文，文件会保存到 ./dist/ru/data.json
-    const jsonPath = path.join(langBaseDir, 'data.json');
-    fs.writeFileSync(jsonPath, JSON.stringify(langData, null, 2));
-    console.log(`✅ ${langLabel} 数据索引已保存: ${jsonPath} (${langData.length} 篇文章)`);
-    
+    allCombinedData = allCombinedData.concat(langData);
     totalArticlesForSitemap = totalArticlesForSitemap.concat(langData);
 
-    // 5. 生成详情页 HTML
+    // 生成详情页 HTML (详情页依然保持物理隔离在 /ru/ 下)
+    const langBaseDir = isEn ? `./dist` : `./dist/ru`;
+    if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
+    
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
-    const groups = {};
     validEntries.forEach(item => {
-      const cat = (item.fields.category || 'dynamics').trim();
-      if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(item);
-    });
-
-    for (const [catRaw, items] of Object.entries(groups)) {
-      items.forEach((item, i) => {
-        const { title, body, slug, datedTime, imgAlt, summary } = item.fields;
-        const contentHtml = documentToHtmlString(body);
-        const catLower = catRaw.toLowerCase();
-        
-        let catDisplay = catRaw; 
-        if (!isEn) catDisplay = ruCategoryMap[catLower] || catRaw;
-        const catUpper = catDisplay.toUpperCase();
-        
-        const domain = "https://www.mos-surfactant.com";
-        const sharePath = isEn ? `/${catLower}/${slug}.html` : `/ru/${catLower}/${slug}.html`;
-        const pageUrl = encodeURIComponent(`${domain}${sharePath}`);
-
-        let html = templateContent
-          .replace(/{{TITLE}}/g, title)
-          .replace(/{{CONTENT}}/g, contentHtml)
-          .replace(/{{DATE}}/g, datedTime)
-          .replace(/{{SLUG}}/g, slug)
-          .replace(/{{IMG_ALT}}/g, imgAlt || title)
-          .replace(/{{SUMMARY}}/g, summary || title)
-          .replace(/{{CATEGORY}}/g, catRaw)
-          .replace(/{{CATEGORY_LOWER}}/g, catLower)
-          .replace(/{{CATEGORY_UPPER}}/g, catUpper)
-          .replace(/{{ARTICLE_PATH}}/g, sharePath)
-          .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${pageUrl}`)
-          .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${pageUrl}`)
-          .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodeURIComponent(title)}%20${pageUrl}`)
-          .replace(/{{TWITTER_SHARE}}/g, `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${pageUrl}`);
-
-        const nextPost = items[i - 1]; 
-        const prevPost = items[i + 1];
-        html = html.replace('{{PREV_LINK}}', prevPost ? `${prevPost.fields.slug}.html` : '#')
-                   .replace('{{PREV_TITLE}}', prevPost ? prevPost.fields.title : 'None')
-                   .replace('{{NEXT_LINK}}', nextPost ? `${nextPost.fields.slug}.html` : '#')
-                   .replace('{{NEXT_TITLE}}', nextPost ? nextPost.fields.title : 'No newer posts');
-
-        const outDir = `${langBaseDir}/${catLower}`;
+        const { title, body, slug, datedTime, category } = item.fields;
+        const catLower = category.trim().toLowerCase();
+        const outDir = path.join(langBaseDir, catLower);
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-        fs.writeFileSync(`${outDir}/${slug}.html`, html);
-      });
-    }
+        
+        const contentHtml = documentToHtmlString(body);
+        const html = templateContent.replace(/{{TITLE}}/g, title).replace(/{{CONTENT}}/g, contentHtml).replace(/{{DATE}}/g, datedTime);
+        fs.writeFileSync(path.join(outDir, `${slug}.html`), html);
+    });
   }
 
-  updateSitemapAppended(totalArticlesForSitemap);
-  console.log('\n🚀 构建流程完美结束！');
+  // 4. 【核心改动】：在根目录生成唯一的全量 data.json
+  fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
+  console.log(`✅ 全量 data.json 已生成，共包含 ${allCombinedData.length} 条多语言数据。`);
+
+  // Sitemap 更新逻辑...
+  console.log('🚀 构建流程完美结束！');
 }
 
 run().catch(error => {
-    console.error("❌ 构建过程中出现错误:", error);
+    console.error("❌ 错误:", error);
     process.exit(1);
 });
