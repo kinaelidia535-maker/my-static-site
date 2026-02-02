@@ -43,7 +43,7 @@ async function run() {
   if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
   fs.mkdirSync('./dist', { recursive: true });
 
-  // 2. 拷贝所有静态资源
+  // 2. 拷贝静态资源
   const foldersToCopy = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh'];
   foldersToCopy.forEach(folder => {
     if (fs.existsSync(`./${folder}`)) copyFolderSync(`./${folder}`, `./dist/${folder}`);
@@ -54,10 +54,9 @@ async function run() {
     if (fs.existsSync(`./${file}`)) fs.copyFileSync(`./${file}`, `./dist/${file}`);
   });
 
-  let allCombinedData = []; // 用于存放所有语言的合并数据
-  let totalArticlesForSitemap = [];
+  let allCombinedData = []; 
 
-  // 3. 从 Contentful 获取数据
+  // 3. 从 Contentful 获取数据 (使用 withAllLocales 模式)
   console.log(`正在从 Contentful 获取全量语言数据...`);
   const response = await client.withAllLocales.getEntries({ 
     content_type: 'master', 
@@ -67,45 +66,61 @@ async function run() {
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
+    console.log(`--- 正在处理语言分支: ${locale} (标记为: ${langKey}) ---`);
     
+    // 【优化过滤逻辑】
     const validEntries = response.items.filter(item => {
-        return item.fields && item.fields.title && item.fields.title[locale];
+        // 检查该语言下标题是否存在
+        const hasTitle = item.fields && item.fields.title && item.fields.title[locale];
+        if (!hasTitle) console.log(`⚠️ 跳过条目 [${item.sys.id}]: 缺失 ${locale} 版本的标题`);
+        return hasTitle;
     }).map(item => {
         const flattenedFields = {};
+        // 扁平化所有基础字段
         Object.keys(item.fields).forEach(key => {
-            flattenedFields[key] = item.fields[key][locale] || '';
+            // 如果当前语言没有值，尝试回退到 en-US
+            flattenedFields[key] = item.fields[key][locale] || item.fields[key]['en-US'] || '';
         });
-        const featuredImage = item.fields.featuredImage ? item.fields.featuredImage[locale] : null;
-        return { ...item, fields: flattenedFields, featuredImageRaw: featuredImage };
+
+        // 【核心修正】：处理 withAllLocales 下复杂的图片结构
+        let finalImg = getRandomLocalImage();
+        try {
+            const imgAsset = item.fields.featuredImage ? item.fields.featuredImage[locale] : null;
+            // 在 withAllLocales 下，Asset 内部的 fields 也是带 locale 键的
+            const imgUrl = imgAsset?.fields?.file[locale]?.url || imgAsset?.fields?.file['en-US']?.url;
+            if (imgUrl) {
+                finalImg = imgUrl.startsWith('//') ? 'https:' + imgUrl : imgUrl;
+            }
+        } catch (e) {
+            console.log(`🖼️ 图片解析失败 [${item.sys.id}], 使用随机图`);
+        }
+
+        return { ...item, flattenedFields, finalImg };
     });
 
-    if (validEntries.length === 0) continue;
-
-    // 构建数据并加入 lang 字段
+    // 构建 data.json 用的结构
     const langData = validEntries.map(item => {
-      const catLower = (item.fields.category || 'dynamics').trim().toLowerCase();
-      const articleUrl = isEn ? `/${catLower}/${item.fields.slug}.html` : `/ru/${catLower}/${item.fields.slug}.html`;
+      const f = item.flattenedFields;
+      const catLower = (f.category || 'dynamics').trim().toLowerCase();
       
-      let finalImg = '';
-      const ctfImg = item.featuredImageRaw?.fields?.file?.url;
-      finalImg = ctfImg ? (ctfImg.startsWith('//') ? 'https:' + ctfImg : ctfImg) : getRandomLocalImage();
+      // 生成正确的物理 URL
+      const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
 
       return {
-        title: item.fields.title,
-        summary: item.fields.summary || '', 
-        date: item.fields.datedTime,
+        title: f.title,
+        summary: f.summary || '', 
+        date: f.datedTime,
         url: articleUrl,
-        img: finalImg,
-        alt: item.fields.imgAlt || item.fields.title,
+        img: item.finalImg,
+        alt: f.imgAlt || f.title,
         category: catLower,
-        lang: langKey // --- 新增语言字段 ---
+        lang: langKey // 确保写入对应的语言标记
       };
     });
 
     allCombinedData = allCombinedData.concat(langData);
-    totalArticlesForSitemap = totalArticlesForSitemap.concat(langData);
 
-    // 生成详情页 HTML (详情页依然保持物理隔离在 /ru/ 下)
+    // 4. 生成详情页 HTML
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
     
@@ -113,26 +128,28 @@ async function run() {
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     validEntries.forEach(item => {
-        const { title, body, slug, datedTime, category } = item.fields;
+        const { title, body, slug, datedTime, category } = item.flattenedFields;
         const catLower = category.trim().toLowerCase();
         const outDir = path.join(langBaseDir, catLower);
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         
+        // 渲染富文本内容
         const contentHtml = documentToHtmlString(body);
-        const html = templateContent.replace(/{{TITLE}}/g, title).replace(/{{CONTENT}}/g, contentHtml).replace(/{{DATE}}/g, datedTime);
+        const html = templateContent
+            .replace(/{{TITLE}}/g, title)
+            .replace(/{{CONTENT}}/g, contentHtml)
+            .replace(/{{DATE}}/g, datedTime);
+            
         fs.writeFileSync(path.join(outDir, `${slug}.html`), html);
     });
   }
 
-  // 4. 【核心改动】：在根目录生成唯一的全量 data.json
+  // 5. 生成唯一的全量 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 全量 data.json 已生成，共包含 ${allCombinedData.length} 条多语言数据。`);
-
-  // Sitemap 更新逻辑...
-  console.log('🚀 构建流程完美结束！');
+  console.log(`✅ 构建完成！data.json 共包含 ${allCombinedData.length} 条记录。`);
 }
 
 run().catch(error => {
-    console.error("❌ 错误:", error);
+    console.error("❌ 致命错误:", error);
     process.exit(1);
 });
