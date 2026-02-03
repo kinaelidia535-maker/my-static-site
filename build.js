@@ -17,7 +17,6 @@ const ruCategoryMap = {
     'news': 'Новости'
 };
 
-// 替换为你的实际域名，用于生成分享链接
 const SITE_URL = 'https://www.mos-surfactant.com'; 
 
 // --- 2. 工具函数 ---
@@ -56,6 +55,8 @@ async function run() {
   });
 
   let allCombinedData = [];
+  let newSitemapEntries = ""; // 用于存储新生成的 sitemap 条目
+  const today = new Date().toISOString().split('T')[0];
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
@@ -78,12 +79,14 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 映射 JSON 数据
     const langData = validItems.map(item => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
+      // 生成 Sitemap 条目字符串
+      newSitemapEntries += `  <url>\n    <loc>${SITE_URL}${articleUrl}</loc>\n    <lastmod>${today}</lastmod>\n    <priority>0.80</priority>\n  </url>\n`;
+
       let finalImg = "";
       const ctfImg = f.featuredImage?.fields?.file?.url;
       if (ctfImg) {
@@ -112,19 +115,14 @@ async function run() {
     validItems.forEach((item, index) => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
-      
-      // 上下篇逻辑
       const nextItem = validItems[index - 1]; 
       const prevItem = validItems[index + 1];
 
-      // 分享链接
       const pageUrl = `${SITE_URL}${isEn ? '' : '/ru'}/${catLower}/${f.slug}.html`;
       const encodedUrl = encodeURIComponent(pageUrl);
       const encodedTitle = encodeURIComponent(f.title);
-
       const contentHtml = documentToHtmlString(f.body);
 
-      // 严格替换模板占位符
       let html = templateContent
         .replace(/{{TITLE}}/g, f.title)
         .replace(/{{CONTENT}}/g, contentHtml)
@@ -145,6 +143,29 @@ async function run() {
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
       fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
     });
+  }
+
+  // --- Sitemap 处理逻辑 ---
+  const sitemapTemplatePath = './sitemap1.xml';
+  if (fs.existsSync(sitemapTemplatePath)) {
+    let sitemapContent = fs.readFileSync(sitemapTemplatePath, 'utf8');
+    
+    // 定位 <urlset ...> 标签的结束位置
+    const urlsetMatch = sitemapContent.match(/<urlset[^>]*>/);
+    if (urlsetMatch) {
+      const insertPosition = urlsetMatch.index + urlsetMatch[0].length;
+      
+      // 在标签后方插入新内容（实现顶部写入）
+      const updatedSitemap = 
+        sitemapContent.slice(0, insertPosition) + 
+        "\n" + newSitemapEntries + 
+        sitemapContent.slice(insertPosition);
+      
+      // 写入到输出目录和备份文件
+      fs.writeFileSync('./dist/sitemap.xml', updatedSitemap);
+      fs.writeFileSync('./sitemap1.xml', updatedSitemap); // 写回根目录以备下次使用
+      console.log(`✅ Sitemap 已更新，新条目已插入顶部。`);
+    }
   }
 
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
