@@ -76,12 +76,12 @@ async function run() {
     const langData = response.items.map(item => {
       const f = item.fields;
 
-      // 【核心修正 A】：防止语言回退污染
-      // 检查条目自带的 lang 标签是否与当前处理的 locale 匹配
-      // 如果条目里标的是 'en'，但我们现在在处理 'ru' 循环，直接剔除
-      if (f.lang !== langKey) return null;
-
-      if (!f.title || !f.slug) return null;
+      // 【精准过滤逻辑】：
+      // 1. 必须有标题和 Slug，否则是幽灵数据。
+      // 2. 只有当条目里填写的 lang 字段确实等于当前循环的 langKey 时才处理。
+      // 注意：确保你在 Contentful 后台的 'lang' 字段内容是 'en' 或 'ru'。
+      if (!f.title || !f.slug || !f.lang) return null;
+      if (f.lang.trim().toLowerCase() !== langKey) return null;
 
       const catLower = (f.category || 'dynamics').trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
@@ -115,11 +115,11 @@ async function run() {
     response.items.forEach(item => {
       const f = item.fields;
       
-      // 【核心修正 B】：同步 HTML 生成的语言过滤
-      if (f.lang !== langKey) return;
-      if (!f.title || !f.category || !f.slug) return;
+      // 同步过滤逻辑，确保 HTML 不会生成错误语言的内容
+      if (!f.title || !f.slug || !f.lang) return;
+      if (f.lang.trim().toLowerCase() !== langKey) return;
 
-      const catLower = f.category.trim().toLowerCase();
+      const catLower = (f.category || 'dynamics').trim().toLowerCase();
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -134,8 +134,9 @@ async function run() {
     });
   }
 
+  // 生成统一的 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 构建成功！已通过严格语言校验，有效记录：${allCombinedData.length} 条。`);
+  console.log(`✅ 构建成功！有效记录：${allCombinedData.length} 条。`);
 }
 
 run().catch(err => {
