@@ -9,7 +9,6 @@ const client = contentful.createClient({
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
 });
 
-// 确保这里的 Locale 代码与 Contentful 后台完全一致
 const locales = ['en-US', 'ru'];
 
 const ruCategoryMap = {
@@ -39,11 +38,31 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
+// --- 新增：严格校验条目是否在当前语言下有效 ---
+function isValidEntryForLocale(item, locale) {
+  const f = item.fields;
+  
+  // 必须有标题、slug、分类和正文内容
+  if (!f.title || !f.slug || !f.category || !f.body) {
+    return false;
+  }
+  
+  // 检查正文是否为空（Contentful的富文本空内容通常只有基础结构）
+  const bodyContent = JSON.stringify(f.body);
+  if (bodyContent.length < 50) { // 空富文本结构通常很短
+    return false;
+  }
+  
+  return true;
+}
+
 // --- 3. 主运行函数 ---
 async function run() {
+  // 初始化 dist
   if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
   fs.mkdirSync('./dist', { recursive: true });
 
+  // 拷贝资源
   const assets = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh', 'script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   assets.forEach(asset => {
     const src = `./${asset}`;
@@ -53,39 +72,36 @@ async function run() {
     }
   });
 
-  let allCombinedData = []; 
+  let allCombinedData = []; // 用于生成根目录的总 data.json
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
-    // 统一 data.json 里的语言标识：en 或 ru
     const langKey = isEn ? "en" : "ru";
-    console.log(`\n>>> 正在处理 [${locale}] 分支...`);
+    console.log(`正在处理语言分支: ${locale}`);
 
+    // 获取当前语言的数据
     const response = await client.getEntries({ 
       content_type: 'master', 
       locale: locale, 
       order: '-sys.createdAt' 
     });
     
-    console.log(`   找到条目总数: ${response.items.length}`);
+    if (response.items.length === 0) continue;
 
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 处理数据
-    const langData = response.items.map(item => {
+    // --- 修正：只处理有效条目 ---
+    const validItems = response.items.filter(item => isValidEntryForLocale(item, locale));
+    
+    console.log(`  ${locale}: ${response.items.length} 条原始数据 → ${validItems.length} 条有效数据`);
+
+    const langData = validItems.map(item => {
       const f = item.fields;
-
-      // --- 核心修正：取消严格的 f.lang 匹配，改为内容存在性校验 ---
-      // 只要有标题且有 slug，就认为是有效内容
-      if (!f.title || !f.slug) {
-        console.warn(`   [跳过] ID: ${item.sys.id} 内容不完整 (缺少标题或Slug)`);
-        return null;
-      }
-
-      const catLower = (f.category || 'dynamics').trim().toLowerCase();
+      const catLower = f.category.trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
+      // 图片逻辑
       let finalImg = "";
       const ctfImg = f.featuredImage?.fields?.file?.url;
       if (ctfImg) {
@@ -94,31 +110,28 @@ async function run() {
         finalImg = getRandomLocalImage();
       }
 
-      console.log(`   [成功] 捕获文章: ${f.title} (${langKey})`);
-
       return {
         title: f.title,
         summary: f.summary || '', 
-        date: f.datedTime || '',
+        date: f.datedTime,
         url: articleUrl,
         img: finalImg,
         alt: f.imgAlt || f.title,
         category: catLower,
         lang: langKey
       };
-    }).filter(Boolean); 
+    });
 
     allCombinedData = allCombinedData.concat(langData);
 
-    // 生成物理 HTML
+    // --- 生成 HTML 文件 ---
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
-    response.items.forEach(item => {
+    validItems.forEach(item => {
       const f = item.fields;
-      if (!f.title || !f.category || !f.slug) return;
-
       const catLower = f.category.trim().toLowerCase();
+      
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -126,19 +139,19 @@ async function run() {
       const html = templateContent
         .replace(/{{TITLE}}/g, f.title)
         .replace(/{{CONTENT}}/g, contentHtml)
-        .replace(/{{DATE}}/g, f.datedTime || '')
+        .replace(/{{DATE}}/g, f.datedTime)
         .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase());
 
       fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
     });
   }
 
-  // 写入最终的 data.json
+  // 生成统一的 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`\n✅ 构建完成！全量 data.json 共包含 ${allCombinedData.length} 条记录。`);
+  console.log(`✅ 构建成功！全量 data.json 包含 ${allCombinedData.length} 条有效记录。`);
 }
 
 run().catch(err => {
-  console.error("❌ 严重错误:", err);
+  console.error("❌ 错误:", err);
   process.exit(1);
 });
