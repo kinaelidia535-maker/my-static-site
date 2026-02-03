@@ -38,24 +38,6 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 新增：严格校验条目是否在当前语言下有效 ---
-function isValidEntryForLocale(item, locale) {
-  const f = item.fields;
-  
-  // 必须有标题、slug、分类和正文内容
-  if (!f.title || !f.slug || !f.category || !f.body) {
-    return false;
-  }
-  
-  // 检查正文是否为空（Contentful的富文本空内容通常只有基础结构）
-  const bodyContent = JSON.stringify(f.body);
-  if (bodyContent.length < 50) { // 空富文本结构通常很短
-    return false;
-  }
-  
-  return true;
-}
-
 // --- 3. 主运行函数 ---
 async function run() {
   // 初始化 dist
@@ -72,30 +54,35 @@ async function run() {
     }
   });
 
-  let allCombinedData = []; // 用于生成根目录的总 data.json
+  let allCombinedData = [];
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
     console.log(`正在处理语言分支: ${locale}`);
 
-    // 获取当前语言的数据
+    // 🔥 关键：只获取当前语言的数据，fallback已禁用
     const response = await client.getEntries({ 
       content_type: 'master', 
-      locale: locale, 
+      locale: locale,  // 指定当前语言
       order: '-sys.createdAt' 
     });
     
-    if (response.items.length === 0) continue;
+    console.log(`  ${locale}: 获取到 ${response.items.length} 条原始数据`);
 
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // --- 修正：只处理有效条目 ---
-    const validItems = response.items.filter(item => isValidEntryForLocale(item, locale));
-    
-    console.log(`  ${locale}: ${response.items.length} 条原始数据 → ${validItems.length} 条有效数据`);
+    // 🔥 过滤掉没有必要字段的条目（fallback禁用后，没内容的条目这些字段会是 undefined）
+    const validItems = response.items.filter(item => {
+      const f = item.fields;
+      // 必须有这些核心字段才算有效
+      return f.title && f.slug && f.category && f.body;
+    });
 
+    console.log(`  ${locale}: ${validItems.length} 条有效数据（已过滤空条目）`);
+
+    // 生成 JSON 数据
     const langData = validItems.map(item => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
@@ -124,7 +111,7 @@ async function run() {
 
     allCombinedData = allCombinedData.concat(langData);
 
-    // --- 生成 HTML 文件 ---
+    // 生成 HTML 文件
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
