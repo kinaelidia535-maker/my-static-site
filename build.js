@@ -54,14 +54,13 @@ async function run() {
     }
   });
 
-  let allCombinedData = []; // 用于生成根目录的总 data.json
+  let allCombinedData = []; 
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
     console.log(`正在处理语言分支: ${locale}`);
 
-    // 获取当前语言的数据
     const response = await client.getEntries({ 
       content_type: 'master', 
       locale: locale, 
@@ -73,18 +72,20 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // --- 修正 A：处理数据用于 JSON，并过滤掉无效条目 ---
+    // --- 修正点：JSON 数据生成 ---
     const langData = response.items.map(item => {
       const f = item.fields;
 
-      // 如果没有标题或没有 slug，说明是该语言下的空条目（幽灵数据），直接跳过
+      // 【核心修正 A】：防止语言回退污染
+      // 检查条目自带的 lang 标签是否与当前处理的 locale 匹配
+      // 如果条目里标的是 'en'，但我们现在在处理 'ru' 循环，直接剔除
+      if (f.lang !== langKey) return null;
+
       if (!f.title || !f.slug) return null;
 
       const catLower = (f.category || 'dynamics').trim().toLowerCase();
-      // 这里的 URL 必须带 /ru/ 前缀给俄语
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
-      // 修正图片逻辑：优先取上传的图，没有才随机
       let finalImg = "";
       const ctfImg = f.featuredImage?.fields?.file?.url;
       if (ctfImg) {
@@ -103,23 +104,22 @@ async function run() {
         category: catLower,
         lang: langKey
       };
-    }).filter(Boolean); // 剔除 null 条目
+    }).filter(Boolean); 
 
     allCombinedData = allCombinedData.concat(langData);
 
-    // --- 修正 B：生成物理 HTML 文件时增加校验 ---
+    // --- 修正点：物理 HTML 生成 ---
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     response.items.forEach(item => {
       const f = item.fields;
       
-      // 只有标题和分类都存在的有效内容才生成 HTML
+      // 【核心修正 B】：同步 HTML 生成的语言过滤
+      if (f.lang !== langKey) return;
       if (!f.title || !f.category || !f.slug) return;
 
       const catLower = f.category.trim().toLowerCase();
-      
-      // 确保文件夹路径正确
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -130,14 +130,12 @@ async function run() {
         .replace(/{{DATE}}/g, f.datedTime)
         .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase());
 
-      // 写入文件
       fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
     });
   }
 
-  // 生成统一的 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 构建成功！全量 data.json 已清洗，包含 ${allCombinedData.length} 条有效记录。`);
+  console.log(`✅ 构建成功！已通过严格语言校验，有效记录：${allCombinedData.length} 条。`);
 }
 
 run().catch(err => {
