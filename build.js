@@ -9,6 +9,7 @@ const client = contentful.createClient({
   accessToken: process.env.CONTENTFUL_ACCESS_TOKEN
 });
 
+// 确保这里的 Locale 代码与 Contentful 后台完全一致
 const locales = ['en-US', 'ru'];
 
 const ruCategoryMap = {
@@ -40,11 +41,9 @@ function getRandomLocalImage() {
 
 // --- 3. 主运行函数 ---
 async function run() {
-  // 初始化 dist
   if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
   fs.mkdirSync('./dist', { recursive: true });
 
-  // 拷贝资源
   const assets = ['imgs', 'flags', 'news', 'dynamics', 'knowledge', 'products', 'ru', 'zh', 'script.js', 'styles.css', 'robots.txt', 'favicon.ico'];
   assets.forEach(asset => {
     const src = `./${asset}`;
@@ -58,8 +57,9 @@ async function run() {
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
+    // 统一 data.json 里的语言标识：en 或 ru
     const langKey = isEn ? "en" : "ru";
-    console.log(`正在处理语言分支: ${locale}`);
+    console.log(`\n>>> 正在处理 [${locale}] 分支...`);
 
     const response = await client.getEntries({ 
       content_type: 'master', 
@@ -67,21 +67,21 @@ async function run() {
       order: '-sys.createdAt' 
     });
     
-    if (response.items.length === 0) continue;
+    console.log(`   找到条目总数: ${response.items.length}`);
 
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // --- 修正点：JSON 数据生成 ---
+    // 处理数据
     const langData = response.items.map(item => {
       const f = item.fields;
 
-      // 【精准过滤逻辑】：
-      // 1. 必须有标题和 Slug，否则是幽灵数据。
-      // 2. 只有当条目里填写的 lang 字段确实等于当前循环的 langKey 时才处理。
-      // 注意：确保你在 Contentful 后台的 'lang' 字段内容是 'en' 或 'ru'。
-      if (!f.title || !f.slug || !f.lang) return null;
-      if (f.lang.trim().toLowerCase() !== langKey) return null;
+      // --- 核心修正：取消严格的 f.lang 匹配，改为内容存在性校验 ---
+      // 只要有标题且有 slug，就认为是有效内容
+      if (!f.title || !f.slug) {
+        console.warn(`   [跳过] ID: ${item.sys.id} 内容不完整 (缺少标题或Slug)`);
+        return null;
+      }
 
       const catLower = (f.category || 'dynamics').trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
@@ -94,10 +94,12 @@ async function run() {
         finalImg = getRandomLocalImage();
       }
 
+      console.log(`   [成功] 捕获文章: ${f.title} (${langKey})`);
+
       return {
         title: f.title,
         summary: f.summary || '', 
-        date: f.datedTime,
+        date: f.datedTime || '',
         url: articleUrl,
         img: finalImg,
         alt: f.imgAlt || f.title,
@@ -108,18 +110,15 @@ async function run() {
 
     allCombinedData = allCombinedData.concat(langData);
 
-    // --- 修正点：物理 HTML 生成 ---
+    // 生成物理 HTML
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     response.items.forEach(item => {
       const f = item.fields;
-      
-      // 同步过滤逻辑，确保 HTML 不会生成错误语言的内容
-      if (!f.title || !f.slug || !f.lang) return;
-      if (f.lang.trim().toLowerCase() !== langKey) return;
+      if (!f.title || !f.category || !f.slug) return;
 
-      const catLower = (f.category || 'dynamics').trim().toLowerCase();
+      const catLower = f.category.trim().toLowerCase();
       const outDir = path.join(langBaseDir, catLower);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -127,19 +126,19 @@ async function run() {
       const html = templateContent
         .replace(/{{TITLE}}/g, f.title)
         .replace(/{{CONTENT}}/g, contentHtml)
-        .replace(/{{DATE}}/g, f.datedTime)
+        .replace(/{{DATE}}/g, f.datedTime || '')
         .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase());
 
       fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
     });
   }
 
-  // 生成统一的 data.json
+  // 写入最终的 data.json
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 构建成功！有效记录：${allCombinedData.length} 条。`);
+  console.log(`\n✅ 构建完成！全量 data.json 共包含 ${allCombinedData.length} 条记录。`);
 }
 
 run().catch(err => {
-  console.error("❌ 错误:", err);
+  console.error("❌ 严重错误:", err);
   process.exit(1);
 });
