@@ -2,6 +2,7 @@ const contentful = require('contentful');
 const fs = require('fs');
 const path = require('path');
 const { documentToHtmlString } = require('@contentful/rich-text-html-renderer');
+const { BLOCKS } = require('@contentful/rich-text-types'); // 必须引入，用于处理图片和表格
 
 // --- 1. 配置 ---
 const client = contentful.createClient({
@@ -19,7 +20,28 @@ const ruCategoryMap = {
 
 const SITE_URL = 'https://www.mos-surfactant.com'; 
 
-// --- 2. 工具函数 ---
+// --- 2. 富文本渲染配置 (核心修复点) ---
+const renderOptions = {
+  renderNode: {
+    // 渲染富文本中的图片
+    [BLOCKS.EMBEDDED_ASSET]: (node) => {
+      const { file, title } = node.data.target.fields;
+      if (!file) return '';
+      const imageUrl = file.url.startsWith('//') ? `https:${file.url}` : file.url;
+      return `
+        <div class="rich-text-image">
+          <img src="${imageUrl}" alt="${title || 'article image'}" loading="lazy" />
+          ${title ? `<p class="image-caption">${title}</p>` : ''}
+        </div>`;
+    },
+    // 确保表格正常渲染（虽然默认会渲染 table 标签，但显式定义更安全）
+    [BLOCKS.TABLE]: (node, next) => `<div class="table-container"><table>${next(node.content)}</table></div>`,
+    [BLOCKS.TABLE_HEADER_CELL]: (node, next) => `<th>${next(node.content)}</th>`,
+    [BLOCKS.TABLE_CELL]: (node, next) => `<td>${next(node.content)}</td>`
+  }
+};
+
+// --- 3. 工具函数 ---
 function copyFolderSync(from, to) {
   if (!fs.existsSync(from)) return;
   if (!fs.existsSync(to)) fs.mkdirSync(to, { recursive: true });
@@ -40,7 +62,7 @@ function getRandomLocalImage() {
   return `/imgs/article_imgs/${paddedNum}.png`;
 }
 
-// --- 3. 主运行函数 ---
+// --- 4. 主运行函数 ---
 async function run() {
   if (fs.existsSync('./dist')) fs.rmSync('./dist', { recursive: true, force: true });
   fs.mkdirSync('./dist', { recursive: true });
@@ -55,13 +77,12 @@ async function run() {
   });
 
   let allCombinedData = [];
-  let newSitemapEntries = ""; // 用于存储新生成的 sitemap 条目
+  let newSitemapEntries = ""; 
   const today = new Date().toISOString().split('T')[0];
 
   for (const locale of locales) {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
-    const pathPrefix = isEn ? "" : "/ru";
 
     console.log(`正在处理: ${locale}`);
 
@@ -71,6 +92,7 @@ async function run() {
       order: '-fields.datedTime' 
     });
     
+    // 过滤掉残缺数据（排除 undefined.html 的元凶）
     const validItems = response.items.filter(item => {
       const f = item.fields;
       return f.title && f.slug && f.category && f.body;
@@ -84,7 +106,6 @@ async function run() {
       const catLower = f.category.trim().toLowerCase();
       const articleUrl = isEn ? `/${catLower}/${f.slug}.html` : `/ru/${catLower}/${f.slug}.html`;
       
-      // 生成 Sitemap 条目字符串
       newSitemapEntries += `  <url>\n    <loc>${SITE_URL}${articleUrl}</loc>\n    <lastmod>${today}</lastmod>\n    <priority>0.80</priority>\n  </url>\n`;
 
       let finalImg = "";
@@ -121,7 +142,9 @@ async function run() {
       const pageUrl = `${SITE_URL}${isEn ? '' : '/ru'}/${catLower}/${f.slug}.html`;
       const encodedUrl = encodeURIComponent(pageUrl);
       const encodedTitle = encodeURIComponent(f.title);
-      const contentHtml = documentToHtmlString(f.body);
+
+      // 使用配置好的 renderOptions 解析富文本（解决图片和表格）
+      const contentHtml = documentToHtmlString(f.body, renderOptions);
 
       let html = templateContent
         .replace(/{{TITLE}}/g, f.title)
@@ -145,26 +168,17 @@ async function run() {
     });
   }
 
-  // --- Sitemap 处理逻辑 ---
+  // --- Sitemap 处理 (保持你的逻辑) ---
   const sitemapTemplatePath = './sitemap1.xml';
   if (fs.existsSync(sitemapTemplatePath)) {
     let sitemapContent = fs.readFileSync(sitemapTemplatePath, 'utf8');
-    
-    // 定位 <urlset ...> 标签的结束位置
     const urlsetMatch = sitemapContent.match(/<urlset[^>]*>/);
     if (urlsetMatch) {
       const insertPosition = urlsetMatch.index + urlsetMatch[0].length;
-      
-      // 在标签后方插入新内容（实现顶部写入）
-      const updatedSitemap = 
-        sitemapContent.slice(0, insertPosition) + 
-        "\n" + newSitemapEntries + 
-        sitemapContent.slice(insertPosition);
-      
-      // 写入到输出目录和备份文件
+      const updatedSitemap = sitemapContent.slice(0, insertPosition) + "\n" + newSitemapEntries + sitemapContent.slice(insertPosition);
       fs.writeFileSync('./dist/sitemap.xml', updatedSitemap);
-      fs.writeFileSync('./sitemap1.xml', updatedSitemap); // 写回根目录以备下次使用
-      console.log(`✅ Sitemap 已更新，新条目已插入顶部。`);
+      fs.writeFileSync('./sitemap1.xml', updatedSitemap); 
+      console.log(`✅ Sitemap 已更新。`);
     }
   }
 
