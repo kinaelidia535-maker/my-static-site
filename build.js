@@ -98,7 +98,6 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
-    // 1. 先生成 data.json 需要的数据和 Sitemap 条目
     const langData = validItems.map(item => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
@@ -127,21 +126,17 @@ async function run() {
     });
     allCombinedData = allCombinedData.concat(langData);
 
-    // 2. 关键修改：按分类对文章进行分组，确保上下页导航在同一分类内
     const categories = ['news', 'dynamics', 'knowledge'];
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
     categories.forEach(cat => {
-      // 过滤出当前分类的文章
       const categoryItems = validItems.filter(item => item.fields.category.trim().toLowerCase() === cat);
 
       categoryItems.forEach((item, index) => {
         const f = item.fields;
         const catLower = cat;
         
-        // 只在当前分类的文章列表中找上一篇和下一篇
-        // 注意：API order 是日期倒序，所以 index-1 是“更新的/下一篇”，index+1 是“更旧的/上一篇”
         const nextItem = categoryItems[index - 1]; 
         const prevItem = categoryItems[index + 1];
 
@@ -173,47 +168,41 @@ async function run() {
     });
   }
 
-// --- Sitemap 处理 (自动去重优化版) ---
+  // --- Sitemap 处理 ---
   const sitemapTemplatePath = './sitemap1.xml';
   if (fs.existsSync(sitemapTemplatePath)) {
     let sitemapContent = fs.readFileSync(sitemapTemplatePath, 'utf8');
-
-    // 1. 提取文件中现有的所有 <url> 块
     const urlRegex = /<url>[\s\S]*?<\/url>/g;
     const existingUrls = sitemapContent.match(urlRegex) || [];
-
-    // 2. 将新生成的条目转为数组
-    // 注意：我们将 newSitemapEntries 拆分为单条，方便后续对比
     const newEntriesArray = newSitemapEntries.trim().split('</url>').filter(i => i.includes('<url>')).map(i => i + '</url>');
-
-    // 3. 合并新旧内容，并以 <loc> 标签内容作为唯一 Key 进行去重
-    // 使用 Map 可以确保：如果 URL 重复，保留最新的版本（newEntries 放在后面覆盖旧的）
     const allUrlsMap = new Map();
 
-    // 先放旧的
     existingUrls.forEach(entry => {
       const locMatch = entry.match(/<loc>(.*?)<\/loc>/);
       if (locMatch) allUrlsMap.set(locMatch[1], entry);
     });
-
-    // 后放新的，如果有重复的 URL，新的会替换掉旧的（日期也会更新）
     newEntriesArray.forEach(entry => {
       const locMatch = entry.match(/<loc>(.*?)<\/loc>/);
       if (locMatch) allUrlsMap.set(locMatch[1], entry);
     });
 
-    // 4. 重新构建 Sitemap 内容
     const cleanUrlList = Array.from(allUrlsMap.values()).join('\n');
-
-    // 5. 组合最终的 XML
     const finalSitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${cleanUrlList}
 </urlset>`;
 
-    // 6. 写入到输出目录和备份文件
     fs.writeFileSync('./dist/sitemap.xml', finalSitemap);
     fs.writeFileSync('./sitemap1.xml', finalSitemap); 
-    
-    console.log(`✅ Sitemap 已自动清理去重。当前总条目数: ${allUrlsMap.size}`);
+    console.log(`✅ Sitemap 已自动清理去重。`);
   }
+
+  // 写入 JSON 记录
+  fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
+  console.log(`✅ 构建成功！有效记录总数: ${allCombinedData.length}`);
+} // <--- 关键点：这里补齐了 run 函数的闭合括号
+
+run().catch(err => {
+  console.error("❌ 错误:", err);
+  process.exit(1);
+});
