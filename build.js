@@ -2,7 +2,7 @@ const contentful = require('contentful');
 const fs = require('fs');
 const path = require('path');
 const { documentToHtmlString } = require('@contentful/rich-text-html-renderer');
-const { BLOCKS } = require('@contentful/rich-text-types'); // 必须引入，用于处理图片和表格
+const { BLOCKS } = require('@contentful/rich-text-types'); 
 
 // --- 1. 配置 ---
 const client = contentful.createClient({
@@ -20,10 +20,9 @@ const ruCategoryMap = {
 
 const SITE_URL = 'https://www.mos-surfactant.com'; 
 
-// --- 2. 富文本渲染配置 (核心修复点) ---
+// --- 2. 富文本渲染配置 ---
 const renderOptions = {
   renderNode: {
-    // 渲染富文本中的图片
     [BLOCKS.EMBEDDED_ASSET]: (node) => {
       const { file, title } = node.data.target.fields;
       if (!file) return '';
@@ -34,7 +33,6 @@ const renderOptions = {
           ${title ? `<p class="image-caption">${title}</p>` : ''}
         </div>`;
     },
-    // 确保表格正常渲染（虽然默认会渲染 table 标签，但显式定义更安全）
     [BLOCKS.TABLE]: (node, next) => `<div class="table-container"><table>${next(node.content)}</table></div>`,
     [BLOCKS.TABLE_HEADER_CELL]: (node, next) => `<th>${next(node.content)}</th>`,
     [BLOCKS.TABLE_CELL]: (node, next) => `<td>${next(node.content)}</td>`
@@ -84,7 +82,7 @@ async function run() {
     const isEn = locale === 'en-US';
     const langKey = isEn ? "en" : "ru";
 
-    console.log(`正在处理: ${locale}`);
+    console.log(`正在处理语言: ${locale}`);
 
     const response = await client.getEntries({ 
       content_type: 'master', 
@@ -92,7 +90,6 @@ async function run() {
       order: '-fields.datedTime' 
     });
     
-    // 过滤掉残缺数据（排除 undefined.html 的元凶）
     const validItems = response.items.filter(item => {
       const f = item.fields;
       return f.title && f.slug && f.category && f.body;
@@ -101,6 +98,7 @@ async function run() {
     const langBaseDir = isEn ? `./dist` : `./dist/ru`;
     if (!fs.existsSync(langBaseDir)) fs.mkdirSync(langBaseDir, { recursive: true });
 
+    // 1. 先生成 data.json 需要的数据和 Sitemap 条目
     const langData = validItems.map(item => {
       const f = item.fields;
       const catLower = f.category.trim().toLowerCase();
@@ -127,48 +125,55 @@ async function run() {
         lang: langKey
       };
     });
-
     allCombinedData = allCombinedData.concat(langData);
 
+    // 2. 关键修改：按分类对文章进行分组，确保上下页导航在同一分类内
+    const categories = ['news', 'dynamics', 'knowledge'];
     const templatePath = isEn ? `./template.html` : `./template_ru.html`;
     const templateContent = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : './template.html', 'utf8');
 
-    validItems.forEach((item, index) => {
-      const f = item.fields;
-      const catLower = f.category.trim().toLowerCase();
-      const nextItem = validItems[index - 1]; 
-      const prevItem = validItems[index + 1];
+    categories.forEach(cat => {
+      // 过滤出当前分类的文章
+      const categoryItems = validItems.filter(item => item.fields.category.trim().toLowerCase() === cat);
 
-      const pageUrl = `${SITE_URL}${isEn ? '' : '/ru'}/${catLower}/${f.slug}.html`;
-      const encodedUrl = encodeURIComponent(pageUrl);
-      const encodedTitle = encodeURIComponent(f.title);
+      categoryItems.forEach((item, index) => {
+        const f = item.fields;
+        const catLower = cat;
+        
+        // 只在当前分类的文章列表中找上一篇和下一篇
+        // 注意：API order 是日期倒序，所以 index-1 是“更新的/下一篇”，index+1 是“更旧的/上一篇”
+        const nextItem = categoryItems[index - 1]; 
+        const prevItem = categoryItems[index + 1];
 
-      // 使用配置好的 renderOptions 解析富文本（解决图片和表格）
-      const contentHtml = documentToHtmlString(f.body, renderOptions);
+        const pageUrl = `${SITE_URL}${isEn ? '' : '/ru'}/${catLower}/${f.slug}.html`;
+        const encodedUrl = encodeURIComponent(pageUrl);
+        const encodedTitle = encodeURIComponent(f.title);
+        const contentHtml = documentToHtmlString(f.body, renderOptions);
 
-      let html = templateContent
-        .replace(/{{TITLE}}/g, f.title)
-        .replace(/{{CONTENT}}/g, contentHtml)
-        .replace(/{{DATE}}/g, f.datedTime)
-        .replace(/{{CATEGORY}}/g, f.category)
-        .replace(/{{CATEGORY_LOWER}}/g, catLower)
-        .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase())
-        .replace(/{{SLUG}}/g, f.slug)
-        .replace(/{{PREV_LINK}}/g, prevItem ? `${prevItem.fields.slug}.html` : '#')
-        .replace(/{{PREV_TITLE}}/g, prevItem ? prevItem.fields.title : 'None')
-        .replace(/{{NEXT_LINK}}/g, nextItem ? `${nextItem.fields.slug}.html` : '#')
-        .replace(/{{NEXT_TITLE}}/g, nextItem ? nextItem.fields.title : 'None')
-        .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`)
-        .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`)
-        .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodedTitle}%20${encodedUrl}`);
+        let html = templateContent
+          .replace(/{{TITLE}}/g, f.title)
+          .replace(/{{CONTENT}}/g, contentHtml)
+          .replace(/{{DATE}}/g, f.datedTime)
+          .replace(/{{CATEGORY}}/g, f.category)
+          .replace(/{{CATEGORY_LOWER}}/g, catLower)
+          .replace(/{{CATEGORY_UPPER}}/g, isEn ? catLower.toUpperCase() : (ruCategoryMap[catLower] || catLower).toUpperCase())
+          .replace(/{{SLUG}}/g, f.slug)
+          .replace(/{{PREV_LINK}}/g, prevItem ? `${prevItem.fields.slug}.html` : '#')
+          .replace(/{{PREV_TITLE}}/g, prevItem ? prevItem.fields.title : (isEn ? 'No more' : 'Больше нет'))
+          .replace(/{{NEXT_LINK}}/g, nextItem ? `${nextItem.fields.slug}.html` : '#')
+          .replace(/{{NEXT_TITLE}}/g, nextItem ? nextItem.fields.title : (isEn ? 'No more' : 'Больше нет'))
+          .replace(/{{LINKEDIN_SHARE}}/g, `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`)
+          .replace(/{{FACEBOOK_SHARE}}/g, `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`)
+          .replace(/{{WHATSAPP_SHARE}}/g, `https://api.whatsapp.com/send?text=${encodedTitle}%20${encodedUrl}`);
 
-      const outDir = path.join(langBaseDir, catLower);
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
+        const outDir = path.join(langBaseDir, catLower);
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(path.join(outDir, `${f.slug}.html`), html);
+      });
     });
   }
 
-  // --- Sitemap 处理 (保持你的逻辑) ---
+  // --- Sitemap 处理 ---
   const sitemapTemplatePath = './sitemap1.xml';
   if (fs.existsSync(sitemapTemplatePath)) {
     let sitemapContent = fs.readFileSync(sitemapTemplatePath, 'utf8');
@@ -183,7 +188,7 @@ async function run() {
   }
 
   fs.writeFileSync('./dist/data.json', JSON.stringify(allCombinedData, null, 2));
-  console.log(`✅ 构建成功！有效记录: ${allCombinedData.length}`);
+  console.log(`✅ 构建成功！有效记录总数: ${allCombinedData.length}`);
 }
 
 run().catch(err => {
